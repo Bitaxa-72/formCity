@@ -1,5 +1,5 @@
-from app.logging_context import build_query_frame_log, build_request_log_context, dump_log_context, redact_value
-from app.query_frame import build_query_frame
+from app.pipeline.logging_context import build_query_frame_log, build_request_log_context, dump_log_context, redact_value
+from app.pipeline.query_frame import build_query_frame
 
 
 def test_build_query_frame_log_hides_filter_values() -> None:
@@ -46,7 +46,7 @@ def test_build_request_log_context_contains_safe_summary() -> None:
         {
             "last_intent": "data_query",
             "report_type": "sales_report",
-            "project": "obvodny_118",
+            "project": "obvodny",
             "metrics": ["revenue"],
         },
     )

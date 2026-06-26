@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.config import ConfigError, Settings, parse_allowed_usernames, parse_bool, parse_env_file
+from app.core.config import ConfigError, Settings, normalize_proxy_url, parse_allowed_usernames, parse_bool, parse_env_file
 
 
 def test_parse_env_file_trims_keys_and_values(tmp_path: Path) -> None:
@@ -35,6 +35,22 @@ def test_parse_allowed_usernames_normalizes_values() -> None:
     }
 
 
+def test_settings_safe_summary_counts_admins() -> None:
+    settings = Settings(
+        bot_token="placeholder-token",
+        database_url="sqlite:///placeholder.db",
+        openai_key="placeholder-key",
+        openai_model="model",
+        proxy="socks5://placeholder",
+        allowed_usernames={"tester"},
+        admin_usernames={"admin"},
+    )
+
+    summary = settings.safe_summary()
+
+    assert summary["admin_usernames_count"] == 1
+
+
 def test_parse_bool() -> None:
     assert parse_bool("true", False) is True
     assert parse_bool("0", True) is False
@@ -44,6 +60,11 @@ def test_parse_bool() -> None:
 def test_parse_bool_rejects_unknown_value() -> None:
     with pytest.raises(ConfigError):
         parse_bool("maybe", False)
+
+
+def test_normalize_proxy_url_uses_remote_socks_dns() -> None:
+    assert normalize_proxy_url("socks5://proxy.example:1080") == "socks5h://proxy.example:1080"
+    assert normalize_proxy_url("http://proxy.example:8080") == "http://proxy.example:8080"
 
 
 def test_settings_validate_required() -> None:

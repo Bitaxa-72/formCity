@@ -1,7 +1,7 @@
 import pytest
 
-from app.llm_answer import AnswerDraft
-from app.telegram_response import EMPTY_ANSWER_MESSAGE, send_answer_to_telegram, split_telegram_text
+from app.llm.answer import AnswerDraft
+from app.bot.telegram_response import EMPTY_ANSWER_MESSAGE, send_answer_to_telegram, split_telegram_text
 
 
 class FakeTelegramClient:

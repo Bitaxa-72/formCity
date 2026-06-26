@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Formula City Bot - схема работы</title>
+    <link rel="stylesheet" href="architecture_scheme.css">
+  </head>
+  <body class="scheme">
+    <header class="scheme__header">
+      <div class="scheme__header-content">
+        <p class="scheme__eyebrow">Formula City Bot</p>
+        <h1 class="scheme__title">Полная схема работы проекта</h1>
+        <p class="scheme__lead">
+          Путь от сообщения в Telegram до ответа пользователю: команды, доступ, LLM, контекст,
+          нормализация, SQL, расчет, проверка результата и отправка ответа.
+        </p>
+      </div>
+    </header>
+
+    <main class="scheme__main">
+      <section class="section" id="legend">
+        <div class="section__header">
+          <h2 class="section__title">Как читать схему</h2>
+          <p class="section__text">
+            Каждая карточка показывает слой системы. Стрелки показывают основной путь. Блоки
+            "развилка" показывают условия, при которых бот уходит в другую ветку.
+          </p>
+        </div>
+        <div class="legend">
+          <div class="legend__item legend__item--entry">Вход</div>
+          <div class="legend__item legend__item--process">Обработка</div>
+          <div class="legend__item legend__item--decision">Развилка</div>
+          <div class="legend__item legend__item--data">JSON</div>
+          <div class="legend__item legend__item--exit">Ответ</div>
+        </div>
+      </section>
+
+      <section class="section" id="main-flow">
+        <div class="section__header">
+          <h2 class="section__title">Главная дорога</h2>
+          <p class="section__text">
+            Это нормальный путь текстового запроса к данным. Команды и ошибки уходят в отдельные ветки.
+          </p>
+        </div>
+
+        <div class="flow">
+          <article class="flow__card flow__card--entry">
+            <span class="flow__step">01</span>
+            <h3 class="flow__title">Telegram Update</h3>
+            <p class="flow__text">Бот получает update из Telegram polling или webhook.</p>
+            <pre class="code"><code>{
+  "message": {
+    "from": {"username": "vitalyfrontend"},
+    "chat": {"id": 885428167},
+    "text": "платежный календарь март итоги"
+  }
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--decision">
+            <span class="flow__step">02</span>
+            <h3 class="flow__title">Access</h3>
+            <p class="flow__text">Проверяется username по allowlist. User id сейчас не используется.</p>
+            <div class="flow__split">
+              <div class="flow__split-item">В списке - идем дальше</div>
+              <div class="flow__split-item">Не в списке - отправляем отказ</div>
+            </div>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--decision">
+            <span class="flow__step">03</span>
+            <h3 class="flow__title">Command Router</h3>
+            <p class="flow__text">Если текст начинается с команды, LLM не вызывается.</p>
+            <ul class="flow__list">
+              <li>/start - приветствие и сброс рабочего контекста</li>
+              <li>/info - справка</li>
+              <li>/clear - сброс рабочего контекста</li>
+              <li>/admin - включить или выключить debug</li>
+            </ul>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--process">
+            <span class="flow__step">04</span>
+            <h3 class="flow__title">User Session</h3>
+            <p class="flow__text">Загружается пользователь, dialog_state, history и last_result.</p>
+            <pre class="code"><code>{
+  "dialog_state": {
+    "report_type": "payment_calendar",
+    "project": "all",
+    "period": {"from": "2026-03-01", "to": "2026-03-31", "label": "март"},
+    "metrics": ["plan", "fact", "deviation"],
+    "filters": {},
+    "group_by": ["project"]
+  }
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--data">
+            <span class="flow__step">05</span>
+            <h3 class="flow__title">LLMInput</h3>
+            <p class="flow__text">Backend собирает пакет для LLM: сообщение, текущий контекст, историю, last_result и dictionary.</p>
+            <pre class="code"><code>{
+  "user_message": "факт по рекламе",
+  "dialog_state": {...},
+  "dictionary": {
+    "intent": ["data_query", "dimension_query", "..."],
+    "report_type": ["payment_calendar", "..."],
+    "metric": ["plan", "fact", "deviation"],
+    "report_rules": {"payment_calendar": {...}}
+  }
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--data">
+            <span class="flow__step">06</span>
+            <h3 class="flow__title">LLMParsedResponse</h3>
+            <p class="flow__text">LLM возвращает строгий JSON. Backend валидирует schema и делает repair-pass при ошибке.</p>
+            <pre class="code"><code>{
+  "intent": "data_query",
+  "state_delta": {
+    "metrics": ["fact"],
+    "filters": {"article": "реклама"}
+  },
+  "operation": null,
+  "needs_clarification": false,
+  "confidence": 0.9
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--process">
+            <span class="flow__step">07</span>
+            <h3 class="flow__title">Context Resolver</h3>
+            <p class="flow__text">Применяет state_delta к dialog_state и решает: новый запрос, продолжение или уточнение.</p>
+            <pre class="code"><code>{
+  "report_type": "payment_calendar",
+  "project": "all",
+  "period": {"from": "2026-03-01", "to": "2026-03-31", "label": "март"},
+  "metrics": ["fact"],
+  "filters": {"article": "реклама"},
+  "group_by": ["project"],
+  "last_intent": "data_query"
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--process">
+            <span class="flow__step">08</span>
+            <h3 class="flow__title">QueryFrame</h3>
+            <p class="flow__text">Приводит контекст к рабочему запросу и проверяет обязательные поля.</p>
+            <pre class="code"><code>{
+  "ready": true,
+  "report_type": "payment_calendar",
+  "project": "all",
+  "metrics": ["fact"],
+  "filters": {"article": "реклама"},
+  "group_by": ["project"],
+  "missing_fields": []
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--process">
+            <span class="flow__step">09</span>
+            <h3 class="flow__title">Domain Resolver</h3>
+            <p class="flow__text">Сверяет свободные значения с БД. Например, article="реклама" превращается в точное article="Реклама".</p>
+            <pre class="code"><code>{
+  "valid": true,
+  "frame": {
+    "filters": {"article": "Реклама"}
+  },
+  "errors": []
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--process">
+            <span class="flow__step">10</span>
+            <h3 class="flow__title">Metric Resolution</h3>
+            <p class="flow__text">Проверяет, что метрики, фильтры и группировки разрешены для выбранного типа отчета.</p>
+            <pre class="code"><code>{
+  "valid": true,
+  "metrics": [
+    {"name": "fact", "unit": "rub"}
+  ],
+  "errors": []
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--data">
+            <span class="flow__step">11</span>
+            <h3 class="flow__title">SQLQuery</h3>
+            <p class="flow__text">SQL собирается только из whitelist таблиц, колонок, метрик и фильтров. LLM SQL не пишет.</p>
+            <pre class="code"><code>SELECT
+  project AS project,
+  SUM(fact_amount) AS fact,
+  SUM(plan_amount) AS plan,
+  SUM(deviation_amount) AS deviation,
+  COUNT(*) AS source_rows
+FROM payment_calendar_facts
+WHERE period_month &gt;= :date_from
+  AND period_month &lt;= :date_to
+  AND article = :filter_article
+GROUP BY project</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--data">
+            <span class="flow__step">12</span>
+            <h3 class="flow__title">CalculationResult</h3>
+            <p class="flow__text">Выполняется SQL или операция по last_result.</p>
+            <pre class="code"><code>{
+  "kind": "sql_result",
+  "rows": [
+    {"project": "moskovsky", "fact": 1686810, "plan": 2540000, "deviation": -853190}
+  ],
+  "row_count": 1,
+  "metrics": ["fact"]
+}</code></pre>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--process">
+            <span class="flow__step">13</span>
+            <h3 class="flow__title">Result Verification</h3>
+            <p class="flow__text">Проверяет пустой результат, отсутствующие метрики и источник данных.</p>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--data">
+            <span class="flow__step">14</span>
+            <h3 class="flow__title">ResponseData</h3>
+            <p class="flow__text">Готовит чистый JSON для ответа. Внутренние колонки, например source_rows, скрываются.</p>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--decision">
+            <span class="flow__step">15</span>
+            <h3 class="flow__title">Answer или PDF</h3>
+            <p class="flow__text">Короткий ответ идет текстом. Большая таблица оформляется в PDF.</p>
+          </article>
+
+          <div class="flow__arrow">↓</div>
+
+          <article class="flow__card flow__card--exit">
+            <span class="flow__step">16</span>
+            <h3 class="flow__title">Telegram Response</h3>
+            <p class="flow__text">Ответ режется по лимитам Telegram и отправляется пользователю.</p>
+            <pre class="code"><code>Факт: payment_calendar, all
+
+Проект: Московский:
+Факт: 1 686 810 руб.</code></pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="branches">
+        <div class="section__header">
+          <h2 class="section__title">Развилки</h2>
+          <p class="section__text">Главные условия, которые меняют дорогу запроса.</p>
+        </div>
+
+        <div class="branch-grid">
+          <article class="branch-card">
+            <h3 class="branch-card__title">Команда</h3>
+            <p class="branch-card__text">Если сообщение является командой, LLM не вызывается.</p>
+            <pre class="code"><code>/start
+-> сброс рабочего контекста
+-> приветствие
+
+/admin
+-> переключить debug
+-> сохранить флаг в state</code></pre>
+          </article>
+
+          <article class="branch-card">
+            <h3 class="branch-card__title">Нет доступа</h3>
+            <p class="branch-card__text">Если username не в allowlist, бот сразу отправляет отказ.</p>
+            <pre class="code"><code>{
+  "access": "denied",
+  "message": "У вас нету доступа..."
+}</code></pre>
+          </article>
+
+          <article class="branch-card">
+            <h3 class="branch-card__title">Health failed</h3>
+            <p class="branch-card__text">Если Telegram, LLM API или proxy недоступны, запрос не идет дальше.</p>
+            <pre class="code"><code>{
+  "health": "failed",
+  "failed_service": "llm"
+}</code></pre>
+          </article>
+
+          <article class="branch-card">
+            <h3 class="branch-card__title">General question</h3>
+            <p class="branch-card__text">Приветствие или общий вопрос не меняет рабочий контекст.</p>
+            <pre class="code"><code>{
+  "intent": "general_question",
+  "state_delta": {}
+}</code></pre>
+          </article>
+
+          <article class="branch-card">
+            <h3 class="branch-card__title">Unsupported</h3>
+            <p class="branch-card__text">Запрос вне отчетов не должен запускать SQL.</p>
+            <pre class="code"><code>{
+  "intent": "unsupported",
+  "state_delta": {}
+}</code></pre>
+          </article>
+
+          <article class="branch-card">
+            <h3 class="branch-card__title">Query not ready</h3>
+            <p class="branch-card__text">Если не хватает report_type, metrics или dimension, бот задает уточнение.</p>
+            <pre class="code"><code>{
+  "ready": false,
+  "missing_fields": ["metrics"],
+  "clarification_question": "Уточните метрику..."
+}</code></pre>
+          </article>
+
+          <article class="branch-card">
+            <h3 class="branch-card__title">Domain error</h3>
+            <p class="branch-card__text">Если статья не найдена или совпадений слишком много, SQL не запускается.</p>
+            <pre class="code"><code>{
+  "valid": false,
+  "errors": ["article_ambiguous"],
+  "clarification_question": "Уточните статью..."
+}</code></pre>
+          </article>
+
+          <article class="branch-card">
+            <h3 class="branch-card__title">Metric error</h3>
+            <p class="branch-card__text">Если метрика не относится к отчету или фильтр запрещен, нужен вопрос пользователю.</p>
+            <pre class="code"><code>{
+  "valid": false,
+  "errors": ["metric_not_allowed_for_report_type"]
+}</code></pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="context-rules">
+        <div class="section__header">
+          <h2 class="section__title">Правила контекста</h2>
+          <p class="section__text">
+            Контекст хранится как набор полей. Главное правило: не терять уже понятный смысл и не наследовать опасные поля без причины.
+          </p>
+        </div>
+
+        <div class="rules-table">
+          <div class="rules-table__row rules-table__row--head">
+            <div class="rules-table__cell">Ситуация</div>
+            <div class="rules-table__cell">Что делаем</div>
+            <div class="rules-table__cell">Что сохраняем</div>
+          </div>
+          <div class="rules-table__row">
+            <div class="rules-table__cell">Новый data_query с report_type</div>
+            <div class="rules-table__cell">Начинаем новое дерево</div>
+            <div class="rules-table__cell">Только поля из нового запроса</div>
+          </div>
+          <div class="rules-table__row">
+            <div class="rules-table__cell">data_query без report_type, но старый report_type есть</div>
+            <div class="rules-table__cell">Продолжаем прошлый контекст</div>
+            <div class="rules-table__cell">report_type, period, project, если они не изменены</div>
+          </div>
+          <div class="rules-table__row">
+            <div class="rules-table__cell">Бот ждет уточнение</div>
+            <div class="rules-table__cell">Мержим ответ поверх clarification_base_state</div>
+            <div class="rules-table__cell">Все старые поля, если пользователь их не менял</div>
+          </div>
+          <div class="rules-table__row">
+            <div class="rules-table__cell">Уточнение report_type</div>
+            <div class="rules-table__cell">Дополняем контекст</div>
+            <div class="rules-table__cell">metrics, filters, period не чистим</div>
+          </div>
+          <div class="rules-table__row">
+            <div class="rules-table__cell">Частичный запрос без metrics в payment_calendar</div>
+            <div class="rules-table__cell">Ставим базовые metrics</div>
+            <div class="rules-table__cell">metrics = plan, fact, deviation</div>
+          </div>
+          <div class="rules-table__row">
+            <div class="rules-table__cell">project = all</div>
+            <div class="rules-table__cell">Не смешиваем проекты</div>
+            <div class="rules-table__cell">Добавляем group_by = project</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="scenarios">
+        <div class="section__header">
+          <h2 class="section__title">Сценарии целиком</h2>
+          <p class="section__text">
+            Каждая ветка показана как цепочка: сообщение, JSON от LLM, итоговый контекст, действие backend и ответ.
+          </p>
+        </div>
+
+        <div class="scenario-list">
+          <article class="scenario">
+            <h3 class="scenario__title">1. Полный запрос по платежному календарю</h3>
+            <div class="scenario__grid">
+              <pre class="code"><code>Пользователь:
+платежный календарь март итоги</code></pre>
+              <pre class="code"><code>LLM:
+{
+  "intent": "data_query",
+  "state_delta": {
+    "report_type": "payment_calendar",
+    "period": {"label": "март"},
+    "metrics": ["plan", "fact", "deviation"]
+  }
+}</code></pre>
+              <pre class="code"><code>Context:
+{
+  "report_type": "payment_calendar",
+  "project": "all",
+  "period": {"from": "2026-03-01", "to": "2026-03-31"},
+  "metrics": ["plan", "fact", "deviation"],
+  "group_by": ["project"]
+}</code></pre>
+              <pre class="code"><code>Ответ:
+Проект: Московский:
+План: ...
+Факт: ...
+Отклонение: ...
+
+Проект: Обводный:
+План: ...
+Факт: ...
+Отклонение: ...</code></pre>
+            </div>
+          </article>
+
+          <article class="scenario">
+            <h3 class="scenario__title">2. Продолжение прошлого запроса</h3>
+            <div class="scenario__grid">
+              <pre class="code"><code>Пользователь:
+факт по рекламе</code></pre>
+              <pre class="code"><code>LLM:
+{
+  "intent": "data_query",
+  "state_delta": {
+    "metrics": ["fact"],
+    "filters": {"article": "реклама"}
+  }
+}</code></pre>
+              <pre class="code"><code>Context:
+{
+  "report_type": "payment_calendar",
+  "period": "март",
+  "metrics": ["fact"],
+  "filters": {"article": "реклама"},
+  "group_by": ["project"]
+}</code></pre>
+              <pre class="code"><code>Ответ:
+Проект: Московский:
+Факт: 1 686 810 руб.</code></pre>
+            </div>
+          </article>
+
+          <article class="scenario">
+            <h3 class="scenario__title">3. Частичный запрос без метрики</h3>
+            <div class="scenario__grid">
+              <pre class="code"><code>Пользователь:
+Московский агентские вознаграждения май</code></pre>
+              <pre class="code"><code>LLM:
+{
+  "intent": "data_query",
+  "state_delta": {
+    "project": "moskovsky",
+    "period": {"label": "май"},
+    "filters": {"article": "агентские вознаграждения"}
+  }
+}</code></pre>
+              <pre class="code"><code>Context:
+{
+  "report_type": "payment_calendar",
+  "project": "moskovsky",
+  "period": "май",
+  "metrics": ["plan", "fact", "deviation"],
+  "filters": {"article": "агентские вознаграждения"}
+}</code></pre>
+              <pre class="code"><code>Ответ:
+План: ...
+Факт: ...
+Отклонение: ...</code></pre>
+            </div>
+          </article>
+
+          <article class="scenario">
+            <h3 class="scenario__title">4. Уточнение после вопроса бота</h3>
+            <div class="scenario__grid">
+              <pre class="code"><code>Бот:
+Уточните тип отчета</code></pre>
+              <pre class="code"><code>Сохранено:
+{
+  "metrics": ["fact"],
+  "filters": {"article": "реклама"},
+  "awaiting_clarification": true,
+  "clarification_base_state": {...}
+}</code></pre>
+              <pre class="code"><code>Пользователь:
+платежный календарь</code></pre>
+              <pre class="code"><code>Context:
+{
+  "report_type": "payment_calendar",
+  "metrics": ["fact"],
+  "filters": {"article": "реклама"}
+}</code></pre>
+            </div>
+          </article>
+
+          <article class="scenario">
+            <h3 class="scenario__title">5. Список значений</h3>
+            <div class="scenario__grid">
+              <pre class="code"><code>Пользователь:
+какие статьи расходов есть?</code></pre>
+              <pre class="code"><code>LLM:
+{
+  "intent": "dimension_query",
+  "state_delta": {
+    "report_type": "payment_calendar",
+    "dimension": "article",
+    "filters": {"article_kind": "detail"}
+  }
+}</code></pre>
+              <pre class="code"><code>SQL:
+SELECT DISTINCT article
+FROM payment_calendar_facts
+WHERE article_kind = :detail</code></pre>
+              <pre class="code"><code>Ответ:
+Список статей расходов...</code></pre>
+            </div>
+          </article>
+
+          <article class="scenario">
+            <h3 class="scenario__title">6. Математика по последнему результату</h3>
+            <div class="scenario__grid">
+              <pre class="code"><code>Пользователь:
+подели последний факт на два</code></pre>
+              <pre class="code"><code>LLM:
+{
+  "intent": "math_on_last_result",
+  "operation": {
+    "type": "divide",
+    "left": {"source": "last_result", "metric": "fact"},
+    "right": {"source": "literal", "value": 2}
+  }
+}</code></pre>
+              <pre class="code"><code>Backend:
+берет last_result,
+находит fact,
+делит на 2</code></pre>
+              <pre class="code"><code>Ответ:
+Результат: ...</code></pre>
+            </div>
+          </article>
+
+          <article class="scenario">
+            <h3 class="scenario__title">7. Большой отчет</h3>
+            <div class="scenario__grid">
+              <pre class="code"><code>Условие:
+таблица больше 30 строк</code></pre>
+              <pre class="code"><code>Backend:
+ResponseData готов
+should_send_pdf_report = true</code></pre>
+              <pre class="code"><code>Telegram:
+Отчет слишком большой,
+оформлю вам PDF.</code></pre>
+              <pre class="code"><code>Документ:
+payment_calendar.pdf</code></pre>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="admin-debug">
+        <div class="section__header">
+          <h2 class="section__title">Admin debug</h2>
+          <p class="section__text">
+            В режиме /admin бот отправляет JSON каждого слоя. Это основной способ понять, где сломалась цепочка.
+          </p>
+        </div>
+
+        <div class="debug-chain">
+          <div class="debug-chain__item">01 LLMInput</div>
+          <div class="debug-chain__item">02 LLMParsedResponse</div>
+          <div class="debug-chain__item">03 DialogState</div>
+          <div class="debug-chain__item">04 QueryFrame</div>
+          <div class="debug-chain__item">05 DomainResolution</div>
+          <div class="debug-chain__item">06 MetricResolution</div>
+          <div class="debug-chain__item">07 SQLQuery</div>
+          <div class="debug-chain__item">08 CalculationResult</div>
+          <div class="debug-chain__item">09 ResultVerification</div>
+          <div class="debug-chain__item">10 ResponseData</div>
+          <div class="debug-chain__item">11 AnswerDraft или PDFReport</div>
+          <div class="debug-chain__item">12 TelegramResponseStatus</div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

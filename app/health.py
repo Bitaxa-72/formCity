@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 import httpx
 
-from app.config import Settings
-from app.telegram_client import TelegramClient
+from app.core.config import Settings
+from app.bot.telegram_client import TelegramClient
 
 
 PROXY_ERROR_MESSAGE = "Прокси не работает"

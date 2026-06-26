@@ -1,5 +1,10 @@
+import asyncio
 import logging
+import json
+from contextlib import suppress
 from collections.abc import Generator
+from time import perf_counter
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
@@ -7,37 +12,112 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.access import UNAUTHORIZED_ACCESS_MESSAGE, is_username_allowed
-from app.calculation_engine import CalculationEngine, CalculationError
-from app.commands import COMMAND_RESPONSES, normalize_command
-from app.config import Settings, load_settings
-from app.context_resolver import resolve_context
-from app.database import create_database_tables, get_db_session
+from app.core.access import UNAUTHORIZED_ACCESS_MESSAGE, is_username_allowed, normalize_username
+from app.pipeline.calculation_engine import CalculationEngine, CalculationError
+from app.bot.commands import (
+    ADMIN_DISABLED_MESSAGE,
+    ADMIN_ENABLED_MESSAGE,
+    ADMIN_ONLY_MESSAGE,
+    BOT_COMMANDS,
+    COMMAND_RESPONSES,
+    normalize_command,
+)
+from app.core.config import Settings, load_settings
+from app.pipeline.context_resolver import empty_dialog_state, resolve_context, set_clarification_state
+from app.db.database import create_database_tables, get_db_session
 from app.health import HealthChecker
-from app.llm_answer import LLMAnswerError, OpenAILLMAnswerer
-from app.llm_input import build_llm_input
-from app.llm_parser import LLMParserError, OpenAILLMParser
-from app.logging_context import build_request_log_context, dump_log_context
-from app.metric_resolver import resolve_metrics
-from app.query_frame import build_query_frame
-from app.repositories import UserSessionRepository
-from app.result_verifier import verify_result
-from app.response_data import build_response_data
-from app.sql_compiler import SQLCompileError, compile_sql
-from app.telegram_client import TelegramClient
-from app.telegram_response import send_answer_to_telegram
-from app.telegram_schemas import TelegramUpdate
+from app.llm.answer import (
+    LLMAnswerError,
+    OpenAILLMAnswerer,
+    build_capabilities_answer,
+    build_fallback_answer,
+    build_general_fallback_answer,
+    build_roadmap_unclear_answer,
+)
+from app.llm.dictionary import Intent
+from app.llm.input import build_llm_input
+from app.llm.parser import LLMParsedResponse, LLMParserError, OpenAILLMParser, StateDelta
+from app.pipeline.domain_resolver import DomainResolver, format_period_phrase, format_project_phrase, normalize_search_text, select_article_from_options
+from app.pipeline.dimension_clarification import resolve_dimension_clarification
+from app.pipeline.failed_query import (
+    CONTEXT_BLOCKED_AFTER_ERROR,
+    CONTEXT_BLOCKED_MESSAGE,
+    FAILED_QUERY_ERROR,
+    FAILED_QUERY_STATE,
+    block_short_followup_after_error,
+)
+from app.pipeline.logging_context import build_request_log_context, dump_log_context
+from app.pipeline.math_shortcuts import resolve_math_shortcut
+from app.pipeline.metric_catalog import METRIC_CATALOG
+from app.pipeline.metric_resolver import REPORT_NOT_CONNECTED_MESSAGE, resolve_metrics
+from app.pipeline.pdf_report import PDF_REPORT_NOTICE, build_pdf_report, should_send_pdf_report
+from app.pipeline.query_frame import NON_DATA_QUERY_MESSAGE, QueryPeriod, build_query_frame
+from app.pipeline.report_compatibility import check_report_compatibility
+from app.pipeline.report_semantics import apply_report_semantics
+from app.db.repositories import UserSessionRepository
+from app.pipeline.result_verifier import verify_result
+from app.pipeline.response_data import build_response_data
+from app.pipeline.sql_compiler import SQLCompileError, compile_sql
+from app.bot.telegram_client import CHAT_ACTION_TYPING, CHAT_ACTION_UPLOAD_DOCUMENT, TelegramClient
+from app.bot.telegram_response import TelegramResponseStatus, send_answer_to_telegram, split_telegram_text
+from app.bot.telegram_schemas import TelegramUpdate
+from app.reports.payment_calendar.corrections import build_failed_group_by_correction, build_failed_metric_correction
+from app.reports.roadmap.corrections import build_failed_roadmap_correction
 
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 logger = logging.getLogger("formcity.webhook")
 
 app = FastAPI(title="formCityBot")
-LLM_PARSE_ERROR_MESSAGE = "Не удалось разобрать запрос. Попробуйте сформулировать его точнее."
+LLM_PARSE_ERROR_MESSAGE = NON_DATA_QUERY_MESSAGE
+ADMIN_DEBUG_TASKS: set[asyncio.Task[None]] = set()
+PENDING_SHOW_AVAILABLE_ARTICLES = "show_available_articles"
+PENDING_CONFIRMATIONS = {
+    "да",
+    "давай",
+    "lf",
+    "lfdfq",
+    "покажи",
+    "показать",
+    "список",
+    "покажи список",
+    "покажи статьи",
+    "доступные статьи",
+    "какие есть",
+    "что есть",
+    "можно",
+    "ок",
+    "окей",
+    "ага",
+    "да покажи",
+    "давай список",
+}
+PENDING_CANCELLATIONS = {
+    "нет",
+    "не надо",
+    "не нужно",
+    "отмена",
+    "отмени",
+    "забей",
+    "не показывай",
+}
+PENDING_CANCEL_MESSAGE = "Ок, не показываю список."
+PENDING_UNCLEAR_MESSAGE = 'Не понял ответ. Напишите "да", чтобы показать доступные статьи, или задайте новый запрос полностью.'
+
+
+def user_session_with_state(user_session: object, state: dict[str, object]) -> object:
+    return SimpleNamespace(
+        user=user_session.user,
+        state=state,
+        history=user_session.history,
+        last_result=user_session.last_result,
+    )
 
 
 async def safe_send_message(
@@ -58,12 +138,291 @@ async def safe_send_message(
         return False
 
 
+async def safe_send_chat_action(
+    telegram_client: TelegramClient,
+    chat_id: int,
+    action: str,
+    request_id: str,
+) -> bool:
+    try:
+        await telegram_client.send_chat_action(chat_id, action)
+        return True
+    except Exception:
+        logger.warning(
+            "send_chat_action_failed request_id=%s chat_id=%s action=%s",
+            request_id,
+            chat_id,
+            action,
+        )
+        return False
+
+
+async def keep_chat_action(
+    telegram_client: TelegramClient,
+    chat_id: int,
+    action: str,
+    request_id: str,
+    interval_seconds: int = 4,
+) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        await safe_send_chat_action(telegram_client, chat_id, action, request_id)
+
+
+async def stop_background_task(task: asyncio.Task[None] | None) -> None:
+    if task is None:
+        return
+
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
+
+
+def record_timing(timings: dict[str, int], stage: str, started_at: float) -> None:
+    timings[f"{stage}_ms"] = int((perf_counter() - started_at) * 1000)
+
+
+def is_admin_debug_enabled(username: str | None, settings: Settings, state: dict[str, object] | None) -> bool:
+    normalized_username = normalize_username(username)
+    return bool(
+        normalized_username
+        and normalized_username in settings.admin_usernames
+        and state
+        and state.get("admin_debug_enabled") is True
+    )
+
+
+def preserve_admin_debug_flag(source_state: dict[str, object] | None, target_state: dict[str, object]) -> dict[str, object]:
+    state_to_save = dict(target_state)
+    if source_state and source_state.get("admin_debug_enabled") is True:
+        state_to_save["admin_debug_enabled"] = True
+    return state_to_save
+
+
+def clear_state_preserving_admin_debug(
+    user_session_repository: UserSessionRepository,
+    user_id: int,
+    source_state: dict[str, object] | None,
+) -> None:
+    user_session_repository.clear_state(user_id)
+    if source_state and source_state.get("admin_debug_enabled") is True:
+        user_session_repository.save_dialog_state(user_id, {"admin_debug_enabled": True})
+
+
+def clear_pending_action(state: dict[str, object] | None) -> dict[str, object]:
+    updated = dict(state or {})
+    updated.pop("pending_action", None)
+    updated.pop("pending_payload", None)
+    return updated
+
+
+def classify_pending_response(text: str | None) -> str:
+    normalized = normalize_search_text(text or "")
+    if normalized in PENDING_CANCELLATIONS:
+        return "cancel"
+    if len(normalized.split()) <= 4 and normalized in PENDING_CONFIRMATIONS:
+        return "confirm"
+    if normalized and len(normalized) <= 2 and normalized != "it":
+        return "unclear"
+    return "new_query"
+
+
+def is_capabilities_question(text: str | None) -> bool:
+    normalized = normalize_search_text(text or "")
+    if not normalized:
+        return False
+
+    direct_phrases = {
+        "что ты умеешь",
+        "что умеешь",
+        "что можешь",
+        "что ты можешь",
+        "как пользоваться",
+        "как с тобой работать",
+        "какие возможности",
+        "что доступно",
+        "что можно спросить",
+        "помощь",
+        "help",
+    }
+    if normalized in direct_phrases:
+        return True
+
+    has_capability_word = any(marker in normalized for marker in {"умееш", "можеш", "возможност"})
+    has_question_word = any(marker in normalized for marker in {"что", "чем", "как", "какие"})
+    return has_capability_word and has_question_word
+
+
+def is_vague_followup_question(text: str | None) -> bool:
+    normalized = normalize_search_text(text or "")
+    return normalized in {
+        "а что там",
+        "что там",
+        "покажи это",
+        "покажи",
+        "ну и",
+        "и что",
+        "что дальше",
+        "что по этому",
+        "что по нему",
+    }
+
+
+def is_unclear_roadmap_question(text: str | None) -> bool:
+    normalized = normalize_search_text(text or "")
+    return "дорожная карта" in normalized
+
+
+def is_report_type_not_connected(report_type: str | None) -> bool:
+    return bool(report_type and report_type in METRIC_CATALOG and not METRIC_CATALOG[report_type])
+
+
+def build_available_articles_message(articles: list[str], payload: dict[str, object]) -> str:
+    period = QueryPeriod.model_validate(payload.get("period") or {})
+    title = (
+        "Доступные статьи в платежном календаре "
+        f"по {format_project_phrase(payload.get('project') if isinstance(payload.get('project'), str) else None)} "
+        f"за {format_period_phrase(period)}:"
+    )
+    if not articles:
+        return title + "\n\nНе нашел статей за этот период."
+    return title + "\n\n" + "\n".join(f"- {article}" for article in articles)
+
+
+def apply_article_clarification_selection(
+    state: dict[str, object] | None,
+    parsed_response: LLMParsedResponse,
+    user_text: str | None,
+) -> LLMParsedResponse:
+    if not state or state.get("awaiting_clarification") is not True or state.get("clarification_kind") != "article":
+        return parsed_response
+
+    options = state.get("clarification_options")
+    if not isinstance(options, list) or not all(isinstance(option, str) for option in options):
+        return parsed_response
+
+    selected_article = select_article_from_options(user_text or "", options)
+    if not selected_article:
+        return parsed_response
+
+    delta_data = parsed_response.state_delta.model_dump(mode="json", by_alias=True, exclude_none=True)
+    filters = dict(delta_data.get("filters") or {})
+    filters["article"] = selected_article
+    delta_data["filters"] = filters
+    return parsed_response.model_copy(
+        update={
+            "state_delta": StateDelta.model_validate(delta_data),
+            "needs_clarification": False,
+            "clarification_question": None,
+        },
+    )
+
+
+def apply_dimension_clarification_selection(
+    state: dict[str, object] | None,
+    parsed_response: LLMParsedResponse,
+    user_text: str | None,
+) -> LLMParsedResponse:
+    if not state or state.get("awaiting_clarification") is not True or state.get("clarification_kind") != "dimension":
+        return parsed_response
+
+    resolution = resolve_dimension_clarification(user_text)
+    if not resolution.matched or not resolution.dimension:
+        return parsed_response
+
+    delta_data = parsed_response.state_delta.model_dump(mode="json", by_alias=True, exclude_none=True)
+    delta_data["dimension"] = resolution.dimension
+    delta_data.pop("metrics", None)
+    if resolution.filters:
+        filters = dict(delta_data.get("filters") or {})
+        filters.update(resolution.filters)
+        delta_data["filters"] = filters
+    else:
+        delta_data.pop("filters", None)
+
+    return parsed_response.model_copy(
+        update={
+            "intent": Intent.DIMENSION_QUERY,
+            "state_delta": StateDelta.model_validate(delta_data),
+            "needs_clarification": False,
+            "clarification_question": None,
+        },
+    )
+
+
+def apply_dimension_query_fallback(parsed_response: LLMParsedResponse, user_text: str | None) -> LLMParsedResponse:
+    normalized = normalize_search_text(user_text or "")
+    if "платежн" not in normalized and "календар" not in normalized:
+        return parsed_response
+    if not any(marker in normalized for marker in {"какие", "какой", "список", "перечень"}):
+        return parsed_response
+
+    resolution = resolve_dimension_clarification(user_text)
+    if not resolution.matched or not resolution.dimension:
+        return parsed_response
+
+    delta_data = parsed_response.state_delta.model_dump(mode="json", by_alias=True, exclude_none=True)
+    delta_data["report_type"] = "payment_calendar"
+    delta_data["dimension"] = resolution.dimension
+    delta_data.pop("metrics", None)
+    if resolution.filters:
+        existing_filters = dict(delta_data.get("filters") or {})
+        existing_filters.update(resolution.filters)
+        delta_data["filters"] = existing_filters
+    else:
+        delta_data.pop("filters", None)
+
+    return parsed_response.model_copy(
+        update={
+            "intent": Intent.DIMENSION_QUERY,
+            "state_delta": StateDelta.model_validate(delta_data),
+            "needs_clarification": False,
+            "clarification_question": None,
+        },
+    )
+
+
+async def send_admin_debug_now(
+    telegram_client: TelegramClient,
+    chat_id: int,
+    request_id: str,
+    enabled: bool,
+    stage: str,
+    payload: object,
+) -> None:
+    if not enabled:
+        return
+
+    body = json.dumps(jsonable_encoder(payload), ensure_ascii=False, indent=2)
+    text = f"ADMIN DEBUG: {stage}\nrequest_id: {request_id}\n\n```json\n{body}\n```"
+    for chunk in split_telegram_text(text):
+        await safe_send_message(telegram_client, chat_id, chunk, request_id)
+
+
+async def send_admin_debug(
+    telegram_client: TelegramClient,
+    chat_id: int,
+    request_id: str,
+    enabled: bool,
+    stage: str,
+    payload: object,
+) -> None:
+    if not enabled:
+        return
+
+    task = asyncio.create_task(
+        send_admin_debug_now(telegram_client, chat_id, request_id, enabled, stage, payload),
+    )
+    ADMIN_DEBUG_TASKS.add(task)
+    task.add_done_callback(ADMIN_DEBUG_TASKS.discard)
+
+
 def get_settings() -> Settings:
     return load_settings()
 
 
 def get_telegram_client(settings: Settings = Depends(get_settings)) -> TelegramClient:
-    return TelegramClient(settings.bot_token)
+    return TelegramClient(settings.bot_token, settings.telegram_proxy)
 
 
 def get_database_session(
@@ -100,6 +459,12 @@ def get_calculation_engine(
     return CalculationEngine(db)
 
 
+def get_domain_resolver(
+    db: Session = Depends(get_database_session),
+) -> DomainResolver:
+    return DomainResolver(db)
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -116,18 +481,29 @@ async def dependency_health(
     }
 
 
+@app.post("/telegram/commands")
+async def setup_telegram_commands(
+    telegram_client: TelegramClient = Depends(get_telegram_client),
+) -> dict[str, object]:
+    result = await telegram_client.set_my_commands(BOT_COMMANDS)
+    return {"ok": bool(result.get("ok")), "commands": BOT_COMMANDS}
+
+
 @app.post("/webhook/telegram")
 async def telegram_webhook(
     request: Request,
     settings: Settings = Depends(get_settings),
     telegram_client: TelegramClient = Depends(get_telegram_client),
-    health_checker: HealthChecker = Depends(get_health_checker),
     user_session_repository: UserSessionRepository = Depends(get_user_session_repository),
     llm_parser: OpenAILLMParser = Depends(get_llm_parser),
     llm_answerer: OpenAILLMAnswerer = Depends(get_llm_answerer),
+    domain_resolver: DomainResolver = Depends(get_domain_resolver),
     calculation_engine: CalculationEngine = Depends(get_calculation_engine),
 ) -> dict[str, object]:
     request_id = str(uuid4())
+    request_started_at = perf_counter()
+    timings: dict[str, int] = {}
+    typing_task: asyncio.Task[None] | None = None
     payload = await request.json()
 
     try:
@@ -160,7 +536,7 @@ async def telegram_webhook(
         message.message_id,
     )
 
-    if not is_username_allowed(username, settings.allowed_usernames):
+    if not is_username_allowed(username, settings.allowed_usernames | settings.admin_usernames):
         await safe_send_message(
             telegram_client,
             message.chat.id,
@@ -181,6 +557,7 @@ async def telegram_webhook(
         }
 
     user_session = user_session_repository.load_or_create(username, message.chat.id)
+    current_state = dict(user_session.state or {})
     user_session_repository.add_user_message(
         user_id=user_session.user.id,
         request_id=request_id,
@@ -191,8 +568,52 @@ async def telegram_webhook(
 
     command = normalize_command(message.text)
     if command:
-        if command == "/clear":
-            user_session_repository.clear_state(user_session.user.id)
+        if command == "/admin":
+            normalized_username = normalize_username(username)
+            if not normalized_username or normalized_username not in settings.admin_usernames:
+                await safe_send_message(
+                    telegram_client,
+                    message.chat.id,
+                    ADMIN_ONLY_MESSAGE,
+                    request_id,
+                )
+                return {
+                    "ok": True,
+                    "request_id": request_id,
+                    "access": "allowed",
+                    "command": command,
+                    "admin": "denied",
+                    "session": "loaded",
+                }
+
+            state_to_save = dict(current_state)
+            admin_debug_enabled = not bool(state_to_save.get("admin_debug_enabled"))
+            state_to_save["admin_debug_enabled"] = admin_debug_enabled
+            user_session_repository.save_dialog_state(
+                user_session.user.id,
+                jsonable_encoder(state_to_save),
+            )
+            await safe_send_message(
+                telegram_client,
+                message.chat.id,
+                ADMIN_ENABLED_MESSAGE if admin_debug_enabled else ADMIN_DISABLED_MESSAGE,
+                request_id,
+            )
+            return {
+                "ok": True,
+                "request_id": request_id,
+                "access": "allowed",
+                "command": command,
+                "admin_debug_enabled": admin_debug_enabled,
+                "session": "loaded",
+            }
+
+        if command in {"/clear", "/start"}:
+            clear_state_preserving_admin_debug(
+                user_session_repository,
+                user_session.user.id,
+                current_state,
+            )
 
         await safe_send_message(
             telegram_client,
@@ -216,63 +637,240 @@ async def telegram_webhook(
             "session": "loaded",
         }
 
-    health_result = await health_checker.check_all()
-    if not health_result.ok:
-        if health_result.user_message:
+    if current_state.get("pending_action") == PENDING_SHOW_AVAILABLE_ARTICLES:
+        pending_payload = current_state.get("pending_payload")
+        pending_action = classify_pending_response(message.text)
+
+        if pending_action == "unclear":
+            await safe_send_message(telegram_client, message.chat.id, PENDING_UNCLEAR_MESSAGE, request_id)
+            return {
+                "ok": True,
+                "request_id": request_id,
+                "access": "allowed",
+                "session": "loaded",
+                "pending_action": "unclear",
+                "telegram_response_sent": True,
+            }
+
+        state_to_save = clear_pending_action(current_state)
+        user_session_repository.save_dialog_state(
+            user_session.user.id,
+            jsonable_encoder(state_to_save),
+        )
+
+        if pending_action == "confirm" and isinstance(pending_payload, dict):
+            articles = domain_resolver.load_payment_calendar_articles_for_period(
+                pending_payload.get("project") if isinstance(pending_payload.get("project"), str) else None,
+                pending_payload.get("period") if isinstance(pending_payload.get("period"), dict) else {},
+            )
+            response_text = build_available_articles_message(articles, pending_payload)
+            for chunk in split_telegram_text(response_text):
+                await safe_send_message(telegram_client, message.chat.id, chunk, request_id)
+            return {
+                "ok": True,
+                "request_id": request_id,
+                "access": "allowed",
+                "session": "loaded",
+                "pending_action": "handled",
+                "available_articles": len(articles),
+                "telegram_response_sent": True,
+            }
+
+        if pending_action == "cancel":
+            await safe_send_message(telegram_client, message.chat.id, PENDING_CANCEL_MESSAGE, request_id)
+            return {
+                "ok": True,
+                "request_id": request_id,
+                "access": "allowed",
+                "session": "loaded",
+                "pending_action": "cancelled",
+                "telegram_response_sent": True,
+            }
+
+        current_state = state_to_save
+
+    forced_parsed_response: LLMParsedResponse | None = None
+    failed_group_by_correction = build_failed_group_by_correction(current_state, message.text)
+    failed_metric_correction = build_failed_metric_correction(current_state, message.text)
+    failed_roadmap_correction = build_failed_roadmap_correction(current_state, message.text)
+    if failed_group_by_correction is not None:
+        current_state, forced_parsed_response = failed_group_by_correction
+    elif failed_metric_correction is not None:
+        current_state, forced_parsed_response = failed_metric_correction
+    elif failed_roadmap_correction is not None:
+        current_state, forced_parsed_response = failed_roadmap_correction
+    elif block_short_followup_after_error(current_state, message.text):
+        state_to_save = preserve_admin_debug_flag(current_state, dict(current_state))
+        state_to_save["last_trace"] = jsonable_encoder(
+            {
+                "request_id": request_id,
+                "context_blocked_after_error": True,
+                "telegram_response_sent": True,
+                "timings": timings,
+            },
+        )
+        user_session_repository.save_dialog_state(
+            user_session.user.id,
+            jsonable_encoder(state_to_save),
+        )
+        telegram_response_sent = await safe_send_message(
+            telegram_client,
+            message.chat.id,
+            CONTEXT_BLOCKED_MESSAGE,
+            request_id,
+        )
+        record_timing(timings, "total", request_started_at)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "update_id": update.update_id,
+            "message_id": message.message_id,
+            "username": username,
+            "access": "allowed",
+            "session": "loaded",
+            "context_blocked_after_error": True,
+            "telegram_response_sent": telegram_response_sent,
+            "state_saved": True,
+            "timings": timings,
+        }
+
+    admin_debug_enabled = is_admin_debug_enabled(username, settings, current_state)
+
+    await safe_send_chat_action(telegram_client, message.chat.id, CHAT_ACTION_TYPING, request_id)
+    typing_task = asyncio.create_task(
+        keep_chat_action(telegram_client, message.chat.id, CHAT_ACTION_TYPING, request_id),
+    )
+
+    math_shortcut = resolve_math_shortcut(message.text, user_session.last_result) if forced_parsed_response is None else None
+    if math_shortcut and math_shortcut.handled:
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "01 MathShortcut",
+            math_shortcut,
+        )
+        state_to_save = preserve_admin_debug_flag(current_state, current_state)
+        state_to_save["last_trace"] = jsonable_encoder(
+            {
+                "request_id": request_id,
+                "intent": "math_shortcut",
+                "telegram_response_sent": bool(math_shortcut.text),
+                "timings": timings,
+            },
+        )
+        user_session_repository.save_dialog_state(
+            user_session.user.id,
+            jsonable_encoder(state_to_save),
+        )
+        last_result_saved = False
+        if math_shortcut.result is not None:
+            user_session_repository.save_last_result(
+                user_session.user.id,
+                jsonable_encoder(math_shortcut.result),
+                {"source": "math_shortcut", "operation": math_shortcut.result.operation},
+            )
+            last_result_saved = True
+        await stop_background_task(typing_task)
+        telegram_response_sent = False
+        if math_shortcut.text:
+            stage_started_at = perf_counter()
+            telegram_response_sent = await safe_send_message(
+                telegram_client,
+                message.chat.id,
+                math_shortcut.text,
+                request_id,
+            )
+            record_timing(timings, "telegram_send", stage_started_at)
+            if telegram_response_sent:
+                user_session_repository.add_assistant_message(
+                    user_session.user.id,
+                    request_id,
+                    update.update_id,
+                    math_shortcut.text,
+                )
+        record_timing(timings, "total", request_started_at)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "access": "allowed",
+            "session": "loaded",
+            "math_shortcut": "handled",
+            "telegram_response_sent": telegram_response_sent,
+            "state_saved": True,
+            "last_result_saved": last_result_saved,
+            "assistant_message_saved": telegram_response_sent,
+            "timings": timings,
+        }
+
+    if forced_parsed_response is None:
+        stage_started_at = perf_counter()
+        effective_user_session = user_session_with_state(user_session, current_state)
+        llm_input = build_llm_input(message.text, effective_user_session)
+        record_timing(timings, "llm_input", stage_started_at)
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "01 LLMInput",
+            llm_input,
+        )
+        logger.info(
+            "llm_input_built request_id=%s update_id=%s chat_id=%s username=%s history_size=%s has_last_result=%s",
+            request_id,
+            update.update_id,
+            message.chat.id,
+            username,
+            len(llm_input.history),
+            llm_input.last_result_summary is not None,
+        )
+        stage_started_at = perf_counter()
+        try:
+            parsed_response = await llm_parser.parse(llm_input)
+        except LLMParserError:
+            record_timing(timings, "llm_parse", stage_started_at)
+            await stop_background_task(typing_task)
+            logger.exception(
+                "llm_parse_failed request_id=%s update_id=%s chat_id=%s username=%s",
+                request_id,
+                update.update_id,
+                message.chat.id,
+                username,
+            )
             await safe_send_message(
                 telegram_client,
                 message.chat.id,
-                health_result.user_message,
+                LLM_PARSE_ERROR_MESSAGE,
                 request_id,
             )
-        logger.warning(
-            "health_check_failed request_id=%s update_id=%s chat_id=%s username=%s service=%s",
-            request_id,
-            update.update_id,
-            message.chat.id,
-            username,
-            health_result.failed_service,
-        )
-        return {
-            "ok": True,
-            "request_id": request_id,
-            "access": "allowed",
-            "health": "failed",
-            "failed_service": health_result.failed_service,
-        }
-
-    llm_input = build_llm_input(message.text, user_session)
-    logger.info(
-        "llm_input_built request_id=%s update_id=%s chat_id=%s username=%s history_size=%s has_last_result=%s",
-        request_id,
-        update.update_id,
-        message.chat.id,
-        username,
-        len(llm_input.history),
-        llm_input.last_result_summary is not None,
-    )
-    try:
-        parsed_response = await llm_parser.parse(llm_input)
-    except LLMParserError:
-        logger.exception(
-            "llm_parse_failed request_id=%s update_id=%s chat_id=%s username=%s",
-            request_id,
-            update.update_id,
-            message.chat.id,
-            username,
-        )
-        await safe_send_message(
+            record_timing(timings, "total", request_started_at)
+            return {
+                "ok": True,
+                "request_id": request_id,
+                "access": "allowed",
+                "llm_parse": "failed",
+                "timings": timings,
+            }
+        record_timing(timings, "llm_parse", stage_started_at)
+        parsed_response = apply_article_clarification_selection(current_state, parsed_response, message.text)
+        parsed_response = apply_dimension_clarification_selection(current_state, parsed_response, message.text)
+        parsed_response = apply_dimension_query_fallback(parsed_response, message.text)
+    else:
+        parsed_response = forced_parsed_response
+        await send_admin_debug(
             telegram_client,
             message.chat.id,
-            LLM_PARSE_ERROR_MESSAGE,
             request_id,
+            admin_debug_enabled,
+            "01 FailedQueryCorrection",
+            {
+                "text": message.text,
+                "state": current_state,
+                "parsed_response": parsed_response,
+            },
         )
-        return {
-            "ok": True,
-            "request_id": request_id,
-            "access": "allowed",
-            "llm_parse": "failed",
-        }
 
     logger.info(
         "llm_parse_done request_id=%s update_id=%s chat_id=%s username=%s intent=%s confidence=%s",
@@ -283,7 +881,177 @@ async def telegram_webhook(
         parsed_response.intent,
         parsed_response.confidence,
     )
-    resolved_state = resolve_context(user_session.state, parsed_response)
+    logger.info(
+        "llm_parsed_payload request_id=%s update_id=%s chat_id=%s username=%s payload=%s",
+        request_id,
+        update.update_id,
+        message.chat.id,
+        username,
+        json.dumps(jsonable_encoder(parsed_response), ensure_ascii=False, sort_keys=True),
+    )
+    await send_admin_debug(
+        telegram_client,
+        message.chat.id,
+        request_id,
+        admin_debug_enabled,
+        "02 LLMParsedResponse",
+        parsed_response,
+    )
+
+    if parsed_response.intent == Intent.GENERAL_QUESTION:
+        answer_error = None
+        stage_started_at = perf_counter()
+        if is_capabilities_question(message.text):
+            answer_draft = build_capabilities_answer()
+            record_timing(timings, "llm_answer", stage_started_at)
+        elif is_unclear_roadmap_question(message.text):
+            answer_draft = build_roadmap_unclear_answer()
+            record_timing(timings, "llm_answer", stage_started_at)
+        elif is_vague_followup_question(message.text):
+            answer_draft = build_general_fallback_answer()
+            record_timing(timings, "llm_answer", stage_started_at)
+        else:
+            try:
+                answer_draft = await llm_answerer.build_general_answer(message.text)
+            except LLMAnswerError as error:
+                record_timing(timings, "llm_answer", stage_started_at)
+                answer_error = str(error)
+                answer_draft = build_general_fallback_answer()
+                logger.warning(
+                    "llm_general_answer_failed request_id=%s update_id=%s chat_id=%s username=%s error=%s",
+                    request_id,
+                    update.update_id,
+                    message.chat.id,
+                    username,
+                    answer_error,
+                )
+            else:
+                record_timing(timings, "llm_answer", stage_started_at)
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "03 GeneralAnswerDraft",
+            answer_draft,
+        )
+        await stop_background_task(typing_task)
+        stage_started_at = perf_counter()
+        telegram_response_status = await send_answer_to_telegram(
+            telegram_client,
+            message.chat.id,
+            answer_draft,
+        )
+        record_timing(timings, "telegram_send", stage_started_at)
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "04 TelegramResponseStatus",
+            telegram_response_status,
+        )
+
+        trace = {
+            "request_id": request_id,
+            "intent": parsed_response.intent,
+            "general_answer_done": True,
+            "telegram_response_sent": telegram_response_status.sent,
+            "timings": timings,
+        }
+        state_to_save = preserve_admin_debug_flag(current_state, dict(current_state))
+        state_to_save["last_trace"] = jsonable_encoder(trace)
+        user_session_repository.save_dialog_state(user_session.user.id, jsonable_encoder(state_to_save))
+
+        assistant_message_saved = False
+        if telegram_response_status.sent:
+            user_session_repository.add_assistant_message(
+                user_session.user.id,
+                request_id,
+                update.update_id,
+                answer_draft.text,
+            )
+            assistant_message_saved = True
+
+        record_timing(timings, "total", request_started_at)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "update_id": update.update_id,
+            "message_id": message.message_id,
+            "username": username,
+            "access": "allowed",
+            "session": "loaded",
+            "llm_input": "built",
+            "llm_parse": "done",
+            "intent": parsed_response.intent,
+            "llm_answer": "done",
+            "telegram_response_sent": telegram_response_status.sent,
+            "telegram_response_chunks": telegram_response_status.chunks,
+            "telegram_response_error": telegram_response_status.error,
+            "state_saved": True,
+            "assistant_message_saved": assistant_message_saved,
+            "timings": timings,
+        }
+
+    if parsed_response.intent == Intent.UNSUPPORTED:
+        await stop_background_task(typing_task)
+        stage_started_at = perf_counter()
+        telegram_response_sent = await safe_send_message(
+            telegram_client,
+            message.chat.id,
+            NON_DATA_QUERY_MESSAGE,
+            request_id,
+        )
+        record_timing(timings, "telegram_send", stage_started_at)
+        record_timing(timings, "total", request_started_at)
+
+        state_to_save = preserve_admin_debug_flag(current_state, dict(current_state))
+        state_to_save["last_trace"] = jsonable_encoder(
+            {
+                "request_id": request_id,
+                "intent": parsed_response.intent,
+                "non_data_query": True,
+                "telegram_response_sent": telegram_response_sent,
+                "timings": timings,
+            },
+        )
+        user_session_repository.save_dialog_state(user_session.user.id, jsonable_encoder(state_to_save))
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "03 UnsupportedResponse",
+            {"text": NON_DATA_QUERY_MESSAGE, "sent": telegram_response_sent},
+        )
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "update_id": update.update_id,
+            "message_id": message.message_id,
+            "username": username,
+            "access": "allowed",
+            "session": "loaded",
+            "llm_input": "built",
+            "llm_parse": "done",
+            "intent": parsed_response.intent,
+            "telegram_response_sent": telegram_response_sent,
+            "state_saved": True,
+            "timings": timings,
+        }
+
+    stage_started_at = perf_counter()
+    resolved_state = resolve_context(current_state, parsed_response)
+    record_timing(timings, "context", stage_started_at)
+    await send_admin_debug(
+        telegram_client,
+        message.chat.id,
+        request_id,
+        admin_debug_enabled,
+        "03 DialogState",
+        resolved_state,
+    )
     logger.info(
         "context_resolved request_id=%s update_id=%s chat_id=%s username=%s intent=%s awaiting_clarification=%s",
         request_id,
@@ -293,7 +1061,22 @@ async def telegram_webhook(
         resolved_state["last_intent"],
         resolved_state["awaiting_clarification"],
     )
-    query_frame = build_query_frame(resolved_state)
+    stage_started_at = perf_counter()
+    query_frame = apply_report_semantics(build_query_frame(resolved_state))
+    resolved_state["metrics"] = query_frame.metrics
+    resolved_state["filters"] = query_frame.filters
+    resolved_state["group_by"] = query_frame.group_by
+    resolved_state["view"] = query_frame.view
+    resolved_state["view"] = query_frame.view
+    record_timing(timings, "query_frame", stage_started_at)
+    await send_admin_debug(
+        telegram_client,
+        message.chat.id,
+        request_id,
+        admin_debug_enabled,
+        "04 QueryFrame",
+        query_frame,
+    )
     logger.info(
         "query_frame_built request_id=%s update_id=%s chat_id=%s username=%s ready=%s missing_fields=%s",
         request_id,
@@ -303,7 +1086,282 @@ async def telegram_webhook(
         query_frame.ready,
         query_frame.missing_fields,
     )
+    if is_report_type_not_connected(query_frame.report_type):
+        state_to_save = preserve_admin_debug_flag(current_state, empty_dialog_state())
+        state_to_save["last_trace"] = jsonable_encoder(
+            {
+                "request_id": request_id,
+                "intent": parsed_response.intent,
+                "query_ready": False,
+                "metrics_valid": False,
+                "metric_errors": ["report_type_not_connected"],
+                "telegram_response_sent": True,
+                "timings": timings,
+            },
+        )
+        user_session_repository.save_dialog_state(
+            user_session.user.id,
+            jsonable_encoder(state_to_save),
+        )
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "05 ReportNotConnected",
+            {
+                "report_type": query_frame.report_type,
+                "metric_errors": ["report_type_not_connected"],
+                "response": REPORT_NOT_CONNECTED_MESSAGE,
+            },
+        )
+        await stop_background_task(typing_task)
+        stage_started_at = perf_counter()
+        telegram_response_sent = await safe_send_message(
+            telegram_client,
+            message.chat.id,
+            REPORT_NOT_CONNECTED_MESSAGE,
+            request_id,
+        )
+        record_timing(timings, "telegram_send", stage_started_at)
+        record_timing(timings, "total", request_started_at)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "update_id": update.update_id,
+            "message_id": message.message_id,
+            "username": username,
+            "access": "allowed",
+            "session": "loaded",
+            "llm_input": "built",
+            "llm_parse": "done",
+            "context": "resolved",
+            "query_frame": "built",
+            "query_ready": False,
+            "missing_fields": [],
+            "metrics_valid": False,
+            "metric_errors": ["report_type_not_connected"],
+            "telegram_response_sent": telegram_response_sent,
+            "state_saved": True,
+            "intent": parsed_response.intent,
+            "timings": timings,
+        }
+
+    compatibility_check = check_report_compatibility(query_frame, message.text)
+    if not compatibility_check.valid:
+        state_to_save = preserve_admin_debug_flag(current_state, dict(current_state))
+        state_to_save[CONTEXT_BLOCKED_AFTER_ERROR] = True
+        state_to_save[FAILED_QUERY_ERROR] = compatibility_check.error
+        state_to_save[FAILED_QUERY_STATE] = jsonable_encoder(resolved_state)
+        state_to_save["last_trace"] = jsonable_encoder(
+            {
+                "request_id": request_id,
+                "intent": parsed_response.intent,
+                "query_ready": False,
+                "compatibility_valid": False,
+                "compatibility_error": compatibility_check.error,
+                "context_blocked_after_error": True,
+                "failed_query_state_saved": True,
+                "telegram_response_sent": True,
+                "timings": timings,
+            },
+        )
+        user_session_repository.save_dialog_state(
+            user_session.user.id,
+            jsonable_encoder(state_to_save),
+        )
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "05 CompatibilityCheck",
+            compatibility_check,
+        )
+        await stop_background_task(typing_task)
+        stage_started_at = perf_counter()
+        telegram_response_sent = await safe_send_message(
+            telegram_client,
+            message.chat.id,
+            compatibility_check.message or NON_DATA_QUERY_MESSAGE,
+            request_id,
+        )
+        record_timing(timings, "telegram_send", stage_started_at)
+        record_timing(timings, "total", request_started_at)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "update_id": update.update_id,
+            "message_id": message.message_id,
+            "username": username,
+            "access": "allowed",
+            "session": "loaded",
+            "llm_input": "built",
+            "llm_parse": "done",
+            "context": "resolved",
+            "query_frame": "built",
+            "query_ready": False,
+            "missing_fields": [],
+            "compatibility_valid": False,
+            "compatibility_error": compatibility_check.error,
+            "telegram_response_sent": telegram_response_sent,
+            "state_saved": True,
+            "intent": parsed_response.intent,
+            "timings": timings,
+        }
+
+    stage_started_at = perf_counter()
+    domain_resolution = domain_resolver.resolve(query_frame)
+    query_frame = domain_resolution.frame
+    resolved_state["period"] = query_frame.period.model_dump(by_alias=True)
+    resolved_state["filters"] = query_frame.filters
+    resolved_state["group_by"] = query_frame.group_by
+    resolved_state["view"] = query_frame.view
+    record_timing(timings, "domain", stage_started_at)
+    logger.info(
+        "domain_resolved request_id=%s update_id=%s chat_id=%s username=%s valid=%s errors=%s",
+        request_id,
+        update.update_id,
+        message.chat.id,
+        username,
+        domain_resolution.valid,
+        domain_resolution.errors,
+    )
+    await send_admin_debug(
+        telegram_client,
+        message.chat.id,
+        request_id,
+        admin_debug_enabled,
+        "05 DomainResolution",
+        {
+            "valid": domain_resolution.valid,
+            "errors": domain_resolution.errors,
+            "clarification_question": domain_resolution.clarification_question,
+            "query_frame": query_frame,
+        },
+    )
+    if not domain_resolution.valid:
+        if "period_data_not_found" in domain_resolution.errors:
+            state_to_save = dict(current_state)
+        elif "article_not_found" in domain_resolution.errors:
+            state_to_save = dict(resolved_state)
+            filters = dict(state_to_save.get("filters") or {})
+            missing_article = filters.get("article")
+            filters.pop("article", None)
+            state_to_save["filters"] = filters
+            state_to_save["awaiting_clarification"] = False
+            state_to_save["clarification_target"] = None
+            state_to_save["clarification_base_state"] = None
+            state_to_save["pending_action"] = PENDING_SHOW_AVAILABLE_ARTICLES
+            state_to_save["pending_payload"] = {
+                "report_type": query_frame.report_type,
+                "project": query_frame.project,
+                "period": query_frame.period.model_dump(by_alias=True),
+                "missing_article": missing_article,
+            }
+        elif "article_ambiguous" in domain_resolution.errors:
+            state_to_save = set_clarification_state(
+                resolved_state,
+                domain_resolution.clarification_question,
+                kind=str(domain_resolution.details.get("clarification_kind") or "article"),
+                options=[
+                    option
+                    for option in domain_resolution.details.get("article_candidates", [])
+                    if isinstance(option, str)
+                ],
+            )
+        else:
+            state_to_save = set_clarification_state(resolved_state, domain_resolution.clarification_question)
+        user_session_repository.save_dialog_state(
+            user_session.user.id,
+            jsonable_encoder(preserve_admin_debug_flag(current_state, state_to_save)),
+        )
+        await stop_background_task(typing_task)
+        if domain_resolution.clarification_question:
+            stage_started_at = perf_counter()
+            await safe_send_message(
+                telegram_client,
+                message.chat.id,
+                domain_resolution.clarification_question,
+                request_id,
+            )
+            record_timing(timings, "telegram_send", stage_started_at)
+        record_timing(timings, "total", request_started_at)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "update_id": update.update_id,
+            "message_id": message.message_id,
+            "username": username,
+            "access": "allowed",
+            "session": "loaded",
+            "llm_input": "built",
+            "llm_parse": "done",
+            "context": "resolved",
+            "query_frame": "built",
+            "query_ready": query_frame.ready,
+            "missing_fields": query_frame.missing_fields,
+            "domain_valid": False,
+            "domain_errors": domain_resolution.errors,
+            "telegram_response_sent": bool(domain_resolution.clarification_question),
+            "state_saved": True,
+            "intent": parsed_response.intent,
+            "timings": timings,
+        }
+
+    if not query_frame.ready:
+        clarification_kind = "dimension" if "dimension" in query_frame.missing_fields else None
+        resolved_state = set_clarification_state(
+            resolved_state,
+            query_frame.clarification_question,
+            kind=clarification_kind,
+        )
+        user_session_repository.save_dialog_state(
+            user_session.user.id,
+            jsonable_encoder(preserve_admin_debug_flag(current_state, resolved_state)),
+        )
+        await stop_background_task(typing_task)
+        if query_frame.clarification_question:
+            stage_started_at = perf_counter()
+            await safe_send_message(
+                telegram_client,
+                message.chat.id,
+                query_frame.clarification_question,
+                request_id,
+            )
+            record_timing(timings, "telegram_send", stage_started_at)
+        record_timing(timings, "total", request_started_at)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "update_id": update.update_id,
+            "message_id": message.message_id,
+            "username": username,
+            "access": "allowed",
+            "session": "loaded",
+            "llm_input": "built",
+            "llm_parse": "done",
+            "context": "resolved",
+            "query_frame": "built",
+            "query_ready": False,
+            "missing_fields": query_frame.missing_fields,
+            "telegram_response_sent": bool(query_frame.clarification_question),
+            "state_saved": True,
+            "intent": parsed_response.intent,
+            "timings": timings,
+        }
+
+    stage_started_at = perf_counter()
     metric_resolution = resolve_metrics(query_frame)
+    record_timing(timings, "metrics", stage_started_at)
+    await send_admin_debug(
+        telegram_client,
+        message.chat.id,
+        request_id,
+        admin_debug_enabled,
+        "06 MetricResolution",
+        metric_resolution,
+    )
     logger.info(
         "metrics_resolved request_id=%s update_id=%s chat_id=%s username=%s valid=%s errors=%s",
         request_id,
@@ -313,12 +1371,72 @@ async def telegram_webhook(
         metric_resolution.valid,
         metric_resolution.errors,
     )
+    if not metric_resolution.valid:
+        if {"report_type_not_connected", "metric_not_allowed_for_report_type"} & set(metric_resolution.errors):
+            state_to_save = preserve_admin_debug_flag(current_state, empty_dialog_state())
+        else:
+            resolved_state = set_clarification_state(resolved_state, metric_resolution.clarification_question)
+            state_to_save = preserve_admin_debug_flag(current_state, resolved_state)
+        state_to_save["last_trace"] = jsonable_encoder(
+            {
+                "request_id": request_id,
+                "intent": parsed_response.intent,
+                "query_ready": query_frame.ready,
+                "metrics_valid": False,
+                "metric_errors": metric_resolution.errors,
+                "telegram_response_sent": bool(metric_resolution.clarification_question),
+                "timings": timings,
+            },
+        )
+        user_session_repository.save_dialog_state(
+            user_session.user.id,
+            jsonable_encoder(state_to_save),
+        )
+        await stop_background_task(typing_task)
+        telegram_response_sent = False
+        if metric_resolution.clarification_question:
+            stage_started_at = perf_counter()
+            telegram_response_sent = await safe_send_message(
+                telegram_client,
+                message.chat.id,
+                metric_resolution.clarification_question,
+                request_id,
+            )
+            record_timing(timings, "telegram_send", stage_started_at)
+        record_timing(timings, "total", request_started_at)
+        return {
+            "ok": True,
+            "request_id": request_id,
+            "update_id": update.update_id,
+            "message_id": message.message_id,
+            "username": username,
+            "access": "allowed",
+            "session": "loaded",
+            "llm_input": "built",
+            "llm_parse": "done",
+            "context": "resolved",
+            "query_frame": "built",
+            "query_ready": query_frame.ready,
+            "missing_fields": query_frame.missing_fields,
+            "metrics_valid": False,
+            "metric_errors": metric_resolution.errors,
+            "telegram_response_sent": telegram_response_sent,
+            "state_saved": True,
+            "intent": parsed_response.intent,
+            "timings": timings,
+        }
+
     sql_query = None
     sql_error = None
-    if query_frame.ready and metric_resolution.valid and metric_resolution.metrics:
+    should_compile_sql = query_frame.ready and metric_resolution.valid and (
+        bool(metric_resolution.metrics) or query_frame.intent == "dimension_query"
+    )
+    if should_compile_sql:
+        stage_started_at = perf_counter()
         try:
             sql_query = compile_sql(query_frame, metric_resolution)
         except SQLCompileError as error:
+            record_timing(timings, "sql", stage_started_at)
             sql_error = str(error)
             logger.warning(
                 "sql_compile_failed request_id=%s update_id=%s chat_id=%s username=%s error=%s",
@@ -329,6 +1447,7 @@ async def telegram_webhook(
                 sql_error,
             )
         else:
+            record_timing(timings, "sql", stage_started_at)
             logger.info(
                 "sql_compiled request_id=%s update_id=%s chat_id=%s username=%s table=%s metrics=%s",
                 request_id,
@@ -338,9 +1457,18 @@ async def telegram_webhook(
                 sql_query.table,
                 sql_query.metrics,
             )
+            await send_admin_debug(
+                telegram_client,
+                message.chat.id,
+                request_id,
+                admin_debug_enabled,
+                "07 SQLQuery",
+                sql_query,
+            )
     calculation_result = None
     calculation_error = None
     if query_frame.ready and metric_resolution.valid and (sql_query is not None or query_frame.operation):
+        stage_started_at = perf_counter()
         try:
             calculation_result = calculation_engine.calculate(
                 query_frame,
@@ -348,6 +1476,7 @@ async def telegram_webhook(
                 user_session.last_result,
             )
         except CalculationError as error:
+            record_timing(timings, "calculation", stage_started_at)
             calculation_error = str(error)
             logger.warning(
                 "calculation_failed request_id=%s update_id=%s chat_id=%s username=%s error=%s",
@@ -358,6 +1487,7 @@ async def telegram_webhook(
                 calculation_error,
             )
         else:
+            record_timing(timings, "calculation", stage_started_at)
             logger.info(
                 "calculation_done request_id=%s update_id=%s chat_id=%s username=%s kind=%s row_count=%s",
                 request_id,
@@ -367,13 +1497,23 @@ async def telegram_webhook(
                 calculation_result.kind,
                 calculation_result.row_count,
             )
+            await send_admin_debug(
+                telegram_client,
+                message.chat.id,
+                request_id,
+                admin_debug_enabled,
+                "08 CalculationResult",
+                calculation_result,
+            )
     result_verification = None
     if query_frame.ready and metric_resolution.valid:
+        stage_started_at = perf_counter()
         result_verification = verify_result(
             query_frame,
             metric_resolution,
             calculation_result,
         )
+        record_timing(timings, "verification", stage_started_at)
         logger.info(
             "result_verified request_id=%s update_id=%s chat_id=%s username=%s verified=%s errors=%s",
             request_id,
@@ -383,9 +1523,19 @@ async def telegram_webhook(
             result_verification.verified,
             result_verification.errors,
         )
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "09 ResultVerification",
+            result_verification,
+        )
     response_data = None
     if result_verification is not None:
+        stage_started_at = perf_counter()
         response_data = build_response_data(calculation_result, result_verification)
+        record_timing(timings, "response_data", stage_started_at)
         logger.info(
             "response_data_built request_id=%s update_id=%s chat_id=%s username=%s ready=%s errors=%s",
             request_id,
@@ -395,13 +1545,71 @@ async def telegram_webhook(
             response_data.ready,
             response_data.errors,
         )
+        await send_admin_debug(
+            telegram_client,
+            message.chat.id,
+            request_id,
+            admin_debug_enabled,
+            "10 ResponseData",
+            response_data,
+        )
+    pdf_error = None
+    telegram_response_status = None
+    if response_data is not None and response_data.ready and result_verification is not None and should_send_pdf_report(calculation_result):
+        try:
+            stage_started_at = perf_counter()
+            pdf_bytes, pdf_filename = build_pdf_report(calculation_result, result_verification)
+            record_timing(timings, "pdf", stage_started_at)
+            await stop_background_task(typing_task)
+            await safe_send_chat_action(telegram_client, message.chat.id, CHAT_ACTION_UPLOAD_DOCUMENT, request_id)
+            stage_started_at = perf_counter()
+            await safe_send_message(telegram_client, message.chat.id, PDF_REPORT_NOTICE, request_id)
+            await telegram_client.send_document(
+                message.chat.id,
+                pdf_bytes,
+                pdf_filename,
+                caption="Готовый отчет в PDF.",
+            )
+            record_timing(timings, "telegram_send", stage_started_at)
+            telegram_response_status = TelegramResponseStatus(sent=True, chunks=2)
+        except Exception as error:
+            await stop_background_task(typing_task)
+            pdf_error = type(error).__name__
+            logger.warning(
+                "pdf_report_failed request_id=%s update_id=%s chat_id=%s username=%s error=%s",
+                request_id,
+                update.update_id,
+                message.chat.id,
+                username,
+                pdf_error,
+            )
+        else:
+            logger.info(
+                "pdf_report_sent request_id=%s update_id=%s chat_id=%s username=%s filename=%s",
+                request_id,
+                update.update_id,
+                message.chat.id,
+                username,
+                pdf_filename,
+            )
+            await send_admin_debug(
+                telegram_client,
+                message.chat.id,
+                request_id,
+                admin_debug_enabled,
+                "11 PDFReport",
+                {"filename": pdf_filename, "bytes": len(pdf_bytes), "sent": True},
+            )
     answer_draft = None
     answer_error = None
-    if response_data is not None:
+    if response_data is not None and telegram_response_status is None:
+        stage_started_at = perf_counter()
         try:
             answer_draft = await llm_answerer.build_answer(response_data)
         except LLMAnswerError as error:
+            record_timing(timings, "llm_answer", stage_started_at)
             answer_error = str(error)
+            answer_draft = build_fallback_answer(response_data)
             logger.warning(
                 "llm_answer_failed request_id=%s update_id=%s chat_id=%s username=%s error=%s",
                 request_id,
@@ -411,6 +1619,7 @@ async def telegram_webhook(
                 answer_error,
             )
         else:
+            record_timing(timings, "llm_answer", stage_started_at)
             logger.info(
                 "llm_answer_done request_id=%s update_id=%s chat_id=%s username=%s used_metrics=%s",
                 request_id,
@@ -419,13 +1628,23 @@ async def telegram_webhook(
                 username,
                 answer_draft.used_metrics,
             )
-    telegram_response_status = None
+            await send_admin_debug(
+                telegram_client,
+                message.chat.id,
+                request_id,
+                admin_debug_enabled,
+                "11 AnswerDraft",
+                answer_draft,
+            )
     if answer_draft is not None:
+        await stop_background_task(typing_task)
+        stage_started_at = perf_counter()
         telegram_response_status = await send_answer_to_telegram(
             telegram_client,
             message.chat.id,
             answer_draft,
         )
+        record_timing(timings, "telegram_send", stage_started_at)
         logger.info(
             "telegram_response_sent request_id=%s update_id=%s chat_id=%s username=%s sent=%s chunks=%s error=%s",
             request_id,
@@ -436,6 +1655,15 @@ async def telegram_webhook(
             telegram_response_status.chunks,
             telegram_response_status.error,
         )
+    await stop_background_task(typing_task)
+    await send_admin_debug(
+        telegram_client,
+        message.chat.id,
+        request_id,
+        admin_debug_enabled,
+        "12 TelegramResponseStatus",
+        telegram_response_status,
+    )
     trace = {
         "request_id": request_id,
         "intent": parsed_response.intent,
@@ -445,10 +1673,11 @@ async def telegram_webhook(
         "calculation_done": calculation_result is not None,
         "result_verified": result_verification.verified if result_verification else False,
         "response_data_ready": response_data.ready if response_data else False,
-        "llm_answer_done": answer_draft is not None,
-        "telegram_response_sent": telegram_response_status.sent if telegram_response_status else False,
-    }
-    state_to_save = dict(resolved_state)
+            "llm_answer_done": answer_draft is not None,
+            "telegram_response_sent": telegram_response_status.sent if telegram_response_status else False,
+            "timings": timings,
+        }
+    state_to_save = preserve_admin_debug_flag(current_state, resolved_state)
     state_to_save["last_trace"] = jsonable_encoder(trace)
     user_session_repository.save_dialog_state(
         user_session.user.id,
@@ -510,8 +1739,18 @@ async def telegram_webhook(
             "result_errors": result_verification.errors if result_verification else [],
             "response_data_errors": response_data.errors if response_data else [],
             "llm_answer_error": answer_error,
+            "pdf_error": pdf_error,
             "telegram_response_error": telegram_response_status.error if telegram_response_status else None,
         },
+    )
+    record_timing(timings, "total", request_started_at)
+    logger.info(
+        "request_timings request_id=%s update_id=%s chat_id=%s username=%s timings=%s",
+        request_id,
+        update.update_id,
+        message.chat.id,
+        username,
+        json.dumps(timings, ensure_ascii=False, sort_keys=True),
     )
     logger.info("request_completed %s", dump_log_context(request_log_context))
 
@@ -541,6 +1780,7 @@ async def telegram_webhook(
         "response_data_errors": response_data.errors if response_data else [],
         "llm_answer": "done" if answer_draft else "skipped",
         "llm_answer_error": answer_error,
+        "pdf_error": pdf_error,
         "telegram_response_sent": telegram_response_status.sent if telegram_response_status else False,
         "telegram_response_chunks": telegram_response_status.chunks if telegram_response_status else 0,
         "telegram_response_error": telegram_response_status.error if telegram_response_status else None,
@@ -548,4 +1788,5 @@ async def telegram_webhook(
         "last_result_saved": last_result_saved,
         "assistant_message_saved": assistant_message_saved,
         "intent": parsed_response.intent,
+        "timings": timings,
     }

@@ -2,8 +2,8 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.calculation_engine import CalculationError, calculate_operation, execute_sql_query
-from app.sql_compiler import SQLQuery
+from app.pipeline.calculation_engine import CalculationError, calculate_operation, execute_sql_query
+from app.pipeline.sql_compiler import SQLQuery
 
 
 def create_session():
@@ -26,7 +26,7 @@ def test_execute_sql_query_returns_normalized_rows() -> None:
     db.execute(
         text(
             "INSERT INTO sales_facts (project, revenue_amount, deal_id) "
-            "VALUES ('obvodny_118', 100.126, 1), ('obvodny_118', 50.129, 2)",
+            "VALUES ('obvodny', 100.126, 1), ('obvodny', 50.129, 2)",
         ),
     )
     db.commit()
@@ -39,7 +39,7 @@ def test_execute_sql_query_returns_normalized_rows() -> None:
             "WHERE project = :project "
             "GROUP BY project"
         ),
-        params={"project": "obvodny_118"},
+        params={"project": "obvodny"},
         table="sales_facts",
         metrics=["revenue", "deal_count"],
         group_by=["project"],
@@ -52,7 +52,7 @@ def test_execute_sql_query_returns_normalized_rows() -> None:
     assert result.columns == ["project", "revenue", "deal_count"]
     assert result.rows == [
         {
-            "project": "obvodny_118",
+            "project": "obvodny",
             "revenue": 150.26,
             "deal_count": 2,
         },

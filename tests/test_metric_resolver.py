@@ -1,15 +1,15 @@
-from app.metric_resolver import resolve_metrics
-from app.query_frame import build_query_frame
+from app.pipeline.metric_resolver import REPORT_NOT_CONNECTED_MESSAGE, resolve_metrics
+from app.pipeline.query_frame import build_query_frame
 
 
-def test_resolve_metrics_accepts_sales_revenue_by_floor() -> None:
+def test_resolve_metrics_accepts_payment_calendar_fact() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
-            "report_type": "sales_report",
-            "project": "obvodny_118",
-            "metrics": ["revenue"],
-            "group_by": ["floor"],
+            "report_type": "payment_calendar",
+            "project": "obvodny",
+            "metrics": ["fact"],
+            "filters": {"article_kind": "payment_total"},
         },
     )
 
@@ -17,7 +17,7 @@ def test_resolve_metrics_accepts_sales_revenue_by_floor() -> None:
 
     assert resolution.valid is True
     assert resolution.errors == []
-    assert resolution.metrics[0].name == "revenue"
+    assert resolution.metrics[0].name == "fact"
     assert resolution.metrics[0].unit == "rub"
 
 
@@ -26,7 +26,7 @@ def test_resolve_metrics_rejects_unknown_report_type() -> None:
         {
             "last_intent": "data_query",
             "report_type": "unknown",
-            "metrics": ["revenue"],
+            "metrics": ["fact"],
         },
     )
 
@@ -37,7 +37,23 @@ def test_resolve_metrics_rejects_unknown_report_type() -> None:
     assert resolution.clarification_question == "Уточните тип отчета."
 
 
-def test_resolve_metrics_rejects_metric_for_report_type() -> None:
+def test_resolve_metrics_rejects_not_connected_report_type() -> None:
+    frame = build_query_frame(
+        {
+            "last_intent": "data_query",
+            "report_type": "summary",
+            "metrics": ["fact"],
+        },
+    )
+
+    resolution = resolve_metrics(frame)
+
+    assert resolution.valid is False
+    assert resolution.errors == ["report_type_not_connected"]
+    assert resolution.clarification_question == REPORT_NOT_CONNECTED_MESSAGE
+
+
+def test_resolve_metrics_rejects_metric_for_connected_report_type() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
@@ -50,6 +66,7 @@ def test_resolve_metrics_rejects_metric_for_report_type() -> None:
 
     assert resolution.valid is False
     assert resolution.errors == ["metric_not_allowed_for_report_type"]
+    assert resolution.clarification_question == REPORT_NOT_CONNECTED_MESSAGE
 
 
 def test_resolve_metrics_rejects_group_by_for_metric() -> None:
@@ -72,8 +89,8 @@ def test_resolve_metrics_rejects_filter_for_metric() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
-            "report_type": "sales_report",
-            "metrics": ["revenue"],
+            "report_type": "payment_calendar",
+            "metrics": ["fact"],
             "filters": {"unknown_filter": "value"},
         },
     )
@@ -90,7 +107,7 @@ def test_resolve_metrics_skips_catalog_for_operation() -> None:
             "last_intent": "math_on_last_result",
             "pending_operation": {
                 "type": "divide",
-                "left": {"source": "last_result", "metric": "revenue"},
+                "left": {"source": "last_result", "metric": "fact"},
                 "right": {"source": "literal", "value": 2},
             },
         },

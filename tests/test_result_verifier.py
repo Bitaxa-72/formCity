@@ -1,41 +1,41 @@
-from app.calculation_engine import CalculationResult
-from app.metric_resolver import resolve_metrics
-from app.query_frame import build_query_frame
-from app.result_verifier import verify_result
+from app.pipeline.calculation_engine import CalculationResult
+from app.pipeline.metric_resolver import resolve_metrics
+from app.pipeline.query_frame import build_query_frame
+from app.pipeline.result_verifier import verify_result
 
 
 def test_verify_result_accepts_valid_result() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
-            "report_type": "sales_report",
-            "project": "obvodny_118",
-            "metrics": ["revenue"],
+            "report_type": "payment_calendar",
+            "project": "obvodny",
+            "metrics": ["fact"],
         },
     )
     metric_resolution = resolve_metrics(frame)
     calculation_result = CalculationResult(
         kind="sql_result",
-        rows=[{"project": "obvodny_118", "revenue": 100}],
+        rows=[{"project": "obvodny", "fact": 100}],
         row_count=1,
-        metrics=["revenue"],
-        columns=["project", "revenue"],
+        metrics=["fact"],
+        columns=["project", "fact"],
     )
 
     verification = verify_result(frame, metric_resolution, calculation_result)
 
     assert verification.verified is True
     assert verification.errors == []
-    assert verification.source["report_type"] == "sales_report"
-    assert verification.source["units"] == {"revenue": "rub"}
+    assert verification.source["report_type"] == "payment_calendar"
+    assert verification.source["units"] == {"fact": "rub"}
 
 
 def test_verify_result_rejects_missing_result() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
-            "report_type": "sales_report",
-            "metrics": ["revenue"],
+            "report_type": "payment_calendar",
+            "metrics": ["fact"],
         },
     )
     metric_resolution = resolve_metrics(frame)
@@ -51,8 +51,8 @@ def test_verify_result_rejects_empty_result() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
-            "report_type": "sales_report",
-            "metrics": ["revenue"],
+            "report_type": "payment_calendar",
+            "metrics": ["fact"],
         },
     )
     metric_resolution = resolve_metrics(frame)
@@ -60,8 +60,8 @@ def test_verify_result_rejects_empty_result() -> None:
         kind="sql_result",
         rows=[],
         row_count=0,
-        metrics=["revenue"],
-        columns=["revenue"],
+        metrics=["fact"],
+        columns=["fact"],
     )
 
     verification = verify_result(frame, metric_resolution, calculation_result)
@@ -70,21 +70,68 @@ def test_verify_result_rejects_empty_result() -> None:
     assert verification.errors == ["empty_result"]
 
 
-def test_verify_result_rejects_missing_metric_column() -> None:
+def test_verify_result_rejects_empty_aggregate_result() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
-            "report_type": "sales_report",
-            "metrics": ["revenue"],
+            "report_type": "payment_calendar",
+            "metrics": ["fact"],
         },
     )
     metric_resolution = resolve_metrics(frame)
     calculation_result = CalculationResult(
         kind="sql_result",
-        rows=[{"sold_area": 10}],
+        rows=[{"fact": None, "source_rows": 0}],
         row_count=1,
-        metrics=["sold_area"],
-        columns=["sold_area"],
+        metrics=["fact"],
+        columns=["fact", "source_rows"],
+    )
+
+    verification = verify_result(frame, metric_resolution, calculation_result)
+
+    assert verification.verified is False
+    assert verification.errors == ["empty_result"]
+
+
+def test_verify_result_warns_about_missing_metric_value() -> None:
+    frame = build_query_frame(
+        {
+            "last_intent": "data_query",
+            "report_type": "payment_calendar",
+            "metrics": ["fact"],
+        },
+    )
+    metric_resolution = resolve_metrics(frame)
+    calculation_result = CalculationResult(
+        kind="sql_result",
+        rows=[{"plan": 2900000, "fact": None, "deviation": None, "source_rows": 1}],
+        row_count=1,
+        metrics=["fact"],
+        columns=["plan", "fact", "deviation", "source_rows"],
+    )
+
+    verification = verify_result(frame, metric_resolution, calculation_result)
+
+    assert verification.verified is True
+    assert verification.warnings == ["metric_value_missing"]
+    assert verification.source["missing_metrics"] == ["fact"]
+
+
+def test_verify_result_rejects_missing_metric_column() -> None:
+    frame = build_query_frame(
+        {
+            "last_intent": "data_query",
+            "report_type": "payment_calendar",
+            "metrics": ["fact"],
+        },
+    )
+    metric_resolution = resolve_metrics(frame)
+    calculation_result = CalculationResult(
+        kind="sql_result",
+        rows=[{"plan": 10}],
+        row_count=1,
+        metrics=["plan"],
+        columns=["plan"],
     )
 
     verification = verify_result(frame, metric_resolution, calculation_result)
@@ -97,18 +144,18 @@ def test_verify_result_rejects_project_mismatch() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
-            "report_type": "sales_report",
-            "project": "obvodny_118",
-            "metrics": ["revenue"],
+            "report_type": "payment_calendar",
+            "project": "obvodny",
+            "metrics": ["fact"],
         },
     )
     metric_resolution = resolve_metrics(frame)
     calculation_result = CalculationResult(
         kind="sql_result",
-        rows=[{"project": "well_moskovsky", "revenue": 100}],
+        rows=[{"project": "moskovsky", "fact": 100}],
         row_count=1,
-        metrics=["revenue"],
-        columns=["project", "revenue"],
+        metrics=["fact"],
+        columns=["project", "fact"],
     )
 
     verification = verify_result(frame, metric_resolution, calculation_result)
@@ -121,21 +168,21 @@ def test_verify_result_rejects_period_out_of_range() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
-            "report_type": "sales_report",
+            "report_type": "payment_calendar",
             "period": {
                 "from": "2026-03-01",
                 "to": "2026-03-31",
             },
-            "metrics": ["revenue"],
+            "metrics": ["fact"],
         },
     )
     metric_resolution = resolve_metrics(frame)
     calculation_result = CalculationResult(
         kind="sql_result",
-        rows=[{"deal_date": "2026-04-01", "revenue": 100}],
+        rows=[{"period_month": "2026-04-01", "fact": 100}],
         row_count=1,
-        metrics=["revenue"],
-        columns=["deal_date", "revenue"],
+        metrics=["fact"],
+        columns=["period_month", "fact"],
     )
 
     verification = verify_result(frame, metric_resolution, calculation_result)

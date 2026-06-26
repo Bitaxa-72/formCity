@@ -2,8 +2,8 @@ from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, DialogState, LastResult
-from app.repositories import UserSessionRepository
+from app.db.models import Base, DialogState, LastResult
+from app.db.repositories import UserSessionRepository
 
 
 def create_repository() -> UserSessionRepository:
@@ -68,14 +68,14 @@ def test_save_dialog_state_updates_state() -> None:
     repository.save_dialog_state(
         user_session.user.id,
         {
-            "project": "obvodny_118",
+            "project": "obvodny",
             "metrics": ["revenue"],
         },
     )
     loaded = repository.load_or_create("tester", 777)
 
     assert loaded.state == {
-        "project": "obvodny_118",
+        "project": "obvodny",
         "metrics": ["revenue"],
     }
 
@@ -92,7 +92,7 @@ def test_save_last_result_creates_and_updates_last_result() -> None:
     repository.save_last_result(
         user_session.user.id,
         data={"rows": [{"revenue": 200}]},
-        query_frame={"metrics": ["revenue"], "project": "obvodny_118"},
+        query_frame={"metrics": ["revenue"], "project": "obvodny"},
     )
     loaded = repository.load_or_create("tester", 777)
     last_result = repository.db.scalar(
@@ -101,7 +101,7 @@ def test_save_last_result_creates_and_updates_last_result() -> None:
 
     assert loaded.last_result == {"rows": [{"revenue": 200}]}
     assert last_result is not None
-    assert last_result.query_frame == {"metrics": ["revenue"], "project": "obvodny_118"}
+    assert last_result.query_frame == {"metrics": ["revenue"], "project": "obvodny"}
 
 
 def test_clear_state_resets_state_and_last_result() -> None:
