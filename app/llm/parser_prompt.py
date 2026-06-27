@@ -46,7 +46,8 @@ Context safety rules:
 - Use dialog_state only for valid follow-ups to the same report. A valid follow-up can change period, project, metric, filter, group_by, view, or dimension only when that field exists for the current report_type.
 - Do not infer a new report_type from a short follow-up unless the user names that report or a clear report alias.
 - If the user asks for a concept that is not supported by the current report_type, return intent="unsupported" instead of reusing the last metric, view, or dimension.
-- If there is no current report_type and the user does not name a connected report, return intent="unsupported".
+- If there is no current report_type and the user asks for analytics fields like metric, period, entity, category, article, or filter, return the matching data_query or dimension_query fields and omit report_type; the backend will ask which report to use.
+- If there is no current report_type and the user does not name a connected report or any analytics field, return intent="unsupported".
 - If dialog_state.report_type="stock_for_sale", "сколько этажей?", "какие этажи?", or "покажи этажи" may be dimension_query with view="stock_available_floors" and dimension="floor_number".
 - If dialog_state.report_type is not "stock_for_sale", "сколько этажей?" is unsupported unless the user explicitly names a report where floors are supported.
 - "когда сдача проекта?", "напиши стих", "какая погода?", and similar non-report questions are unsupported even when there is previous data context.
@@ -228,6 +229,21 @@ Period rules:
 - If this is clarification_answer and no period is specified, omit period.
 
 Examples:
+
+User: "факт по рекламе за май"
+JSON:
+{
+  "intent": "data_query",
+  "state_delta": {
+    "period": {"label": "май"},
+    "metrics": ["fact"],
+    "filters": {"article": "реклама"}
+  },
+  "operation": null,
+  "needs_clarification": false,
+  "clarification_question": null,
+  "confidence": 0.85
+}
 
 User: "платежный календарь март итоги"
 JSON:
