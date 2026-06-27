@@ -4,6 +4,7 @@ from typing import Any
 from app.llm.dictionary import Intent
 from app.llm.parser import LLMParsedResponse, StateDelta
 from app.reports.payment_calendar.catalog import PAYMENT_CALENDAR_FULL_METRICS
+from app.reports.registry import METRIC_CATALOG, SQL_TEMPLATES
 
 
 DEFAULT_DIALOG_STATE: dict[str, Any] = {
@@ -151,6 +152,35 @@ def delta_changes_scope(delta: StateDelta) -> bool:
     return isinstance(filters, dict) and bool(filters)
 
 
+def delta_is_compatible_with_report(report_type: str | None, delta: StateDelta) -> bool:
+    if not report_type:
+        return True
+
+    data = delta_data(delta)
+    metric_catalog = METRIC_CATALOG.get(report_type, {})
+    sql_template = SQL_TEMPLATES.get(report_type)
+    if sql_template is None:
+        return True
+
+    metrics = data.get("metrics")
+    if isinstance(metrics, list) and any(metric not in metric_catalog for metric in metrics):
+        return False
+
+    filters = data.get("filters")
+    if isinstance(filters, dict) and any(key not in sql_template.filter_columns for key in filters):
+        return False
+
+    group_by = data.get("group_by")
+    if isinstance(group_by, list) and any(key not in sql_template.group_by_columns for key in group_by):
+        return False
+
+    dimension = data.get("dimension")
+    if isinstance(dimension, str) and dimension not in sql_template.dimension_columns:
+        return False
+
+    return True
+
+
 def should_start_new_state(
     current_state: dict[str, Any],
     parsed_response: LLMParsedResponse,
@@ -163,6 +193,22 @@ def should_start_new_state(
     if delta_has_report_type(parsed_response.state_delta):
         return True
     return not bool(current_state.get("report_type"))
+
+
+def should_discard_incompatible_report_context(
+    current_state: dict[str, Any],
+    parsed_response: LLMParsedResponse,
+    is_clarification_mode: bool,
+) -> bool:
+    if is_clarification_mode:
+        return False
+    if parsed_response.intent not in {Intent.DATA_QUERY, Intent.DIMENSION_QUERY, Intent.CONTEXT_QUERY}:
+        return False
+    if delta_has_report_type(parsed_response.state_delta):
+        return False
+    if not current_state.get("report_type"):
+        return False
+    return not delta_is_compatible_with_report(current_state.get("report_type"), parsed_response.state_delta)
 
 
 def is_report_type_clarification_answer(current_state: dict[str, Any], parsed_response: LLMParsedResponse) -> bool:
@@ -271,7 +317,16 @@ def resolve_context(
         else:
             effective_intent = Intent.CLARIFICATION_ANSWER
 
-    starts_new_state = should_start_new_state(normalized_current_state, parsed_response, is_clarification_mode)
+    discard_incompatible_report_context = should_discard_incompatible_report_context(
+        normalized_current_state,
+        parsed_response,
+        is_clarification_mode,
+    )
+    starts_new_state = discard_incompatible_report_context or should_start_new_state(
+        normalized_current_state,
+        parsed_response,
+        is_clarification_mode,
+    )
     if starts_new_state:
         previous_state = empty_dialog_state()
         resolved = empty_dialog_state()
