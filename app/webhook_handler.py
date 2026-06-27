@@ -33,6 +33,7 @@ from app.pipeline.failed_query import (
     block_short_followup_after_error,
 )
 from app.pipeline.forced_corrections import build_forced_parsed_response
+from app.pipeline.guarded_requests import detect_guarded_non_data_request
 from app.pipeline.llm_postprocess import (
     apply_article_clarification_selection,
     apply_dimension_clarification_selection,
@@ -41,7 +42,7 @@ from app.pipeline.llm_postprocess import (
 from app.pipeline.logging_context import build_request_log_context, dump_log_context
 from app.pipeline.math_shortcuts import resolve_math_shortcut, resolve_pending_math_shortcut
 from app.pipeline.metric_resolver import REPORT_NOT_CONNECTED_MESSAGE, resolve_metrics
-from app.pipeline.non_data_flow import handle_general_question, handle_unsupported_query
+from app.pipeline.non_data_flow import handle_general_question, handle_guarded_non_data_request, handle_unsupported_query
 from app.pipeline.pdf_report import PDF_REPORT_NOTICE, build_pdf_report, should_send_pdf_report
 from app.pipeline.pending_actions import PENDING_SHOW_AVAILABLE_ARTICLES
 from app.pipeline.pending_flow import handle_pending_action
@@ -165,6 +166,25 @@ async def process_telegram_webhook(
     )
     if pending_response is not None:
         return pending_response
+
+    guarded_message = detect_guarded_non_data_request(message.text)
+    if guarded_message is not None:
+        admin_debug_enabled = is_admin_debug_enabled(username, settings, current_state)
+        return await handle_guarded_non_data_request(
+            message_text=guarded_message,
+            chat_id=message.chat.id,
+            update_id=update.update_id,
+            message_id=message.message_id,
+            username=username,
+            request_id=request_id,
+            user_id=user_session.user.id,
+            current_state=current_state,
+            timings=timings,
+            request_started_at=request_started_at,
+            admin_debug_enabled=admin_debug_enabled,
+            telegram_client=telegram_client,
+            user_session_repository=user_session_repository,
+        )
 
     current_state, forced_parsed_response = build_forced_parsed_response(current_state, message.text)
     if forced_parsed_response is None and block_short_followup_after_error(current_state, message.text):

@@ -18,12 +18,79 @@ from app.llm.answer import (
 from app.llm.parser import LLMParsedResponse
 from app.pipeline.admin_debug import send_admin_debug
 from app.pipeline.query_frame import NON_DATA_QUERY_MESSAGE
-from app.pipeline.session_state import preserve_admin_debug_flag
+from app.pipeline.session_state import empty_dialog_state, preserve_admin_debug_flag
 from app.pipeline.text_intents import is_capabilities_question, is_unclear_roadmap_question, is_vague_followup_question
 from app.pipeline.timing import record_timing
 
 
 logger = logging.getLogger("formcity.webhook")
+
+
+async def handle_guarded_non_data_request(
+    *,
+    message_text: str,
+    chat_id: int,
+    update_id: int,
+    message_id: int,
+    username: str | None,
+    request_id: str,
+    user_id: int,
+    current_state: dict[str, object],
+    timings: dict[str, int],
+    request_started_at: float,
+    admin_debug_enabled: bool,
+    telegram_client: TelegramClient,
+    user_session_repository: UserSessionRepository,
+) -> dict[str, object]:
+    stage_started_at = perf_counter()
+    telegram_response_sent = await safe_send_message(
+        telegram_client,
+        chat_id,
+        message_text,
+        request_id,
+    )
+    record_timing(timings, "telegram_send", stage_started_at)
+    record_timing(timings, "total", request_started_at)
+
+    state_to_save = preserve_admin_debug_flag(current_state, empty_dialog_state())
+    state_to_save["last_trace"] = jsonable_encoder(
+        {
+            "request_id": request_id,
+            "guarded_non_data_request": True,
+            "telegram_response_sent": telegram_response_sent,
+            "timings": timings,
+        },
+    )
+    user_session_repository.save_dialog_state(user_id, jsonable_encoder(state_to_save))
+    await send_admin_debug(
+        telegram_client,
+        chat_id,
+        request_id,
+        admin_debug_enabled,
+        "01 GuardedNonDataRequest",
+        {"text": message_text, "sent": telegram_response_sent},
+    )
+    if telegram_response_sent:
+        user_session_repository.add_assistant_message(
+            user_id,
+            request_id,
+            update_id,
+            message_text,
+        )
+    return {
+        "ok": True,
+        "request_id": request_id,
+        "update_id": update_id,
+        "message_id": message_id,
+        "username": username,
+        "access": "allowed",
+        "session": "loaded",
+        "guarded_non_data_request": True,
+        "telegram_response_sent": telegram_response_sent,
+        "state_saved": True,
+        "assistant_message_saved": telegram_response_sent,
+        "timings": timings,
+    }
 
 
 async def handle_general_question(

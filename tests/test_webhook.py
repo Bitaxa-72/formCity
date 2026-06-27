@@ -41,6 +41,7 @@ from app.main import (
 )
 from app.bot.telegram_client import CHAT_ACTION_TYPING, CHAT_ACTION_UPLOAD_DOCUMENT
 from app.pipeline.metric_resolver import REPORT_NOT_CONNECTED_MESSAGE
+from app.pipeline.guarded_requests import DATA_MUTATION_BLOCK_MESSAGE, OUT_OF_SCOPE_BLOCK_MESSAGE
 from app.pipeline.query_frame import DIMENSION_CLARIFICATION, NON_DATA_QUERY_MESSAGE
 from app.pipeline.report_compatibility import (
     PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE,
@@ -666,6 +667,87 @@ def test_telegram_webhook_general_question_uses_llm_without_context_pipeline() -
     assert fake_calculation_engine.calls == []
     assert fake_telegram_client.messages == [(778, "Здравствуйте. Могу помочь с отчетами и данными проекта.")]
     assert fake_user_session_repository.assistant_messages[0]["text"] == "Здравствуйте. Могу помочь с отчетами и данными проекта."
+
+
+def test_telegram_webhook_guarded_out_of_scope_request_does_not_reuse_context() -> None:
+    fake_user_session_repository.state = {
+        "last_intent": "dimension_query",
+        "report_type": "stock_for_sale",
+        "dimension": "floor",
+        "project": "obvodny",
+    }
+    fake_llm_parser.response = LLMParsedResponse(
+        intent="data_query",
+        state_delta={"report_type": "stock_for_sale", "dimension": "floor_number"},
+        confidence=0.9,
+    )
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1056,
+            "message": {
+                "message_id": 109,
+                "date": 1710000000,
+                "chat": {"id": 939, "type": "private"},
+                "from": {
+                    "id": 175,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "какая погода?",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["guarded_non_data_request"] is True
+    assert fake_telegram_client.messages == [(939, OUT_OF_SCOPE_BLOCK_MESSAGE)]
+    assert fake_llm_parser.inputs == []
+    assert fake_domain_resolver.calls == []
+    assert fake_calculation_engine.calls == []
+    assert fake_user_session_repository.state["report_type"] is None
+
+
+def test_telegram_webhook_guarded_mutation_request_does_not_reuse_context() -> None:
+    fake_user_session_repository.state = {
+        "last_intent": "dimension_query",
+        "report_type": "stock_for_sale",
+        "dimension": "floor",
+        "project": "obvodny",
+    }
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1057,
+            "message": {
+                "message_id": 110,
+                "date": 1710000000,
+                "chat": {"id": 940, "type": "private"},
+                "from": {
+                    "id": 176,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "измени данные в таблице",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["guarded_non_data_request"] is True
+    assert fake_telegram_client.messages == [(940, DATA_MUTATION_BLOCK_MESSAGE)]
+    assert fake_llm_parser.inputs == []
+    assert fake_domain_resolver.calls == []
+    assert fake_calculation_engine.calls == []
+    assert fake_user_session_repository.state["report_type"] is None
 
 
 def test_telegram_webhook_capabilities_question_uses_backend_answer() -> None:
