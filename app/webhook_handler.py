@@ -52,7 +52,7 @@ from app.pipeline.response_data import build_response_data
 from app.pipeline.result_verifier import verify_result
 from app.pipeline.session_state import preserve_admin_debug_flag, user_session_with_state
 from app.pipeline.sql_compiler import SQLCompileError, compile_sql
-from app.pipeline.text_intents import is_report_type_not_connected, should_skip_pdf_report
+from app.pipeline.text_intents import is_capabilities_question, is_report_type_not_connected, should_skip_pdf_report
 from app.pipeline.timing import record_timing
 from app.reports.model.catalog import MODEL_RAW_VIEWS
 
@@ -378,7 +378,9 @@ async def process_telegram_webhook(
         parsed_response,
     )
 
-    if parsed_response.intent == Intent.GENERAL_QUESTION:
+    if parsed_response.intent == Intent.GENERAL_QUESTION or (
+        parsed_response.intent == Intent.UNSUPPORTED and is_capabilities_question(message.text)
+    ):
         return await handle_general_question(
             parsed_response,
             text=message.text,

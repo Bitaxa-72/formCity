@@ -708,6 +708,41 @@ def test_telegram_webhook_capabilities_question_uses_backend_answer() -> None:
     assert fake_user_session_repository.assistant_messages[0]["text"] == CAPABILITIES_TEXT
 
 
+def test_telegram_webhook_capabilities_question_handles_unsupported_intent() -> None:
+    fake_llm_parser.response = LLMParsedResponse(
+        intent="unsupported",
+        state_delta={},
+        confidence=0.7,
+    )
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1054,
+            "message": {
+                "message_id": 107,
+                "date": 1710000000,
+                "chat": {"id": 938, "type": "private"},
+                "from": {
+                    "id": 174,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "какие отчеты доступны?",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["intent"] == "unsupported"
+    assert fake_llm_answerer.general_calls == []
+    assert fake_domain_resolver.calls == []
+    assert fake_telegram_client.messages == [(938, CAPABILITIES_TEXT)]
+
+
 def test_telegram_webhook_unclear_roadmap_general_question_uses_backend_answer() -> None:
     fake_llm_parser.response = LLMParsedResponse(
         intent="general_question",

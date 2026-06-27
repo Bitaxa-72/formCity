@@ -12,12 +12,24 @@ def is_capabilities_question(text: str | None) -> bool:
         "что умеешь",
         "что можешь",
         "что ты можешь",
+        "что ты умеешь делать",
         "как пользоваться",
+        "как пользоваться ботом",
         "как с тобой работать",
         "какие возможности",
+        "какие отчеты доступны",
+        "какие отчеты есть",
+        "какие типы отчетов доступны",
+        "какие типы отчетов есть",
+        "список отчетов",
+        "доступные отчеты",
+        "какие данные есть",
+        "какие данные доступны",
         "что доступно",
         "что можно спросить",
         "помощь",
+        "помоги",
+        "подскажи что можно спросить",
         "help",
     }
     if normalized in direct_phrases:
@@ -25,7 +37,10 @@ def is_capabilities_question(text: str | None) -> bool:
 
     has_capability_word = any(marker in normalized for marker in {"умееш", "можеш", "возможност"})
     has_question_word = any(marker in normalized for marker in {"что", "чем", "как", "какие"})
-    return has_capability_word and has_question_word
+    has_report_list_word = "отчет" in normalized and any(marker in normalized for marker in {"какие", "список", "доступн", "есть"})
+    has_data_list_word = "данн" in normalized and any(marker in normalized for marker in {"какие", "что", "доступн", "есть"})
+    has_usage_word = "пользоваться" in normalized and "бот" in normalized
+    return (has_capability_word and has_question_word) or has_report_list_word or has_data_list_word or has_usage_word
 
 
 def should_skip_pdf_report(response_data: object) -> bool:
