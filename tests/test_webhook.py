@@ -763,6 +763,49 @@ def test_telegram_webhook_guarded_keyboard_garbage_does_not_reuse_context() -> N
     assert fake_user_session_repository.last_result is None
 
 
+def test_telegram_webhook_guarded_project_delivery_question_does_not_reuse_context() -> None:
+    fake_user_session_repository.state = {
+        "last_intent": "dimension_query",
+        "report_type": "stock_for_sale",
+        "dimension": "floor",
+        "project": "obvodny",
+    }
+    fake_user_session_repository.last_result = {
+        "report_type": "stock_for_sale",
+        "rows": [{"floor_number": 1}],
+        "metrics": [],
+    }
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1059,
+            "message": {
+                "message_id": 112,
+                "date": 1710000000,
+                "chat": {"id": 942, "type": "private"},
+                "from": {
+                    "id": 178,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "когда сдача проекта?",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["guarded_non_data_request"] is True
+    assert fake_telegram_client.messages == [(942, OUT_OF_SCOPE_BLOCK_MESSAGE)]
+    assert fake_llm_parser.inputs == []
+    assert fake_domain_resolver.calls == []
+    assert fake_calculation_engine.calls == []
+    assert fake_user_session_repository.last_result is None
+
+
 def test_telegram_webhook_guarded_mutation_request_does_not_reuse_context() -> None:
     fake_user_session_repository.state = {
         "last_intent": "dimension_query",
@@ -1024,14 +1067,15 @@ def test_telegram_webhook_unsupported_does_not_reuse_previous_data_context() -> 
     body = response.json()
 
     assert response.status_code == 200
-    assert body["intent"] == "unsupported"
+    assert body["guarded_non_data_request"] is True
     assert body["telegram_response_sent"] is True
-    assert fake_telegram_client.messages == [(780, NON_DATA_QUERY_MESSAGE)]
+    assert fake_telegram_client.messages == [(780, OUT_OF_SCOPE_BLOCK_MESSAGE)]
+    assert fake_llm_parser.inputs == []
     assert fake_domain_resolver.calls == []
     assert fake_calculation_engine.calls == []
     assert fake_llm_answerer.calls == []
-    assert fake_user_session_repository.state["report_type"] == "payment_calendar"
-    assert fake_user_session_repository.state["last_trace"]["non_data_query"] is True
+    assert fake_user_session_repository.state["report_type"] is None
+    assert fake_user_session_repository.state["last_trace"]["guarded_non_data_request"] is True
 
 
 def test_dependency_health_ok() -> None:
@@ -2258,9 +2302,9 @@ def test_telegram_webhook_rejects_floor_question_misread_as_roadmap() -> None:
     body = response.json()
 
     assert response.status_code == 200
-    assert body["compatibility_valid"] is False
-    assert body["compatibility_error"] == "metric_not_supported_for_roadmap"
-    assert fake_telegram_client.messages[0][1].startswith('В дорожной карте нет показателя "этажи".')
+    assert body["guarded_non_data_request"] is True
+    assert fake_telegram_client.messages == [(933, OUT_OF_SCOPE_BLOCK_MESSAGE)]
+    assert fake_llm_parser.inputs == []
     assert fake_calculation_engine.calls == []
 
 
@@ -2751,13 +2795,13 @@ def test_telegram_webhook_sends_not_allowed_metric_message() -> None:
     body = response.json()
 
     assert response.status_code == 200
-    assert body["metrics_valid"] is False
-    assert body["metric_errors"] == ["metric_not_allowed_for_report_type"]
+    assert body["guarded_non_data_request"] is True
     assert body["telegram_response_sent"] is True
-    assert fake_telegram_client.messages == [(900, REPORT_NOT_CONNECTED_MESSAGE)]
+    assert fake_telegram_client.messages == [(900, OUT_OF_SCOPE_BLOCK_MESSAGE)]
+    assert fake_llm_parser.inputs == []
     assert fake_calculation_engine.calls == []
     assert fake_llm_answerer.calls == []
-    assert fake_user_session_repository.saved_states[0]["data"]["awaiting_clarification"] is False
+    assert fake_user_session_repository.saved_states[0]["data"]["last_trace"]["guarded_non_data_request"] is True
 
 
 def test_telegram_webhook_sends_large_report_as_pdf() -> None:
