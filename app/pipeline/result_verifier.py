@@ -44,6 +44,7 @@ def collect_source(
         "dimension": query_frame.dimension,
         "metrics": [metric.name for metric in metric_resolution.metrics] or (calculation_result.metrics if calculation_result else []),
         "units": {metric.name: metric.unit for metric in metric_resolution.metrics},
+        "notices": query_frame.notices,
         "kind": calculation_result.kind if calculation_result else None,
         "missing_metrics": missing_metrics or [],
     }

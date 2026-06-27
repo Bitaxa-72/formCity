@@ -464,6 +464,73 @@ def test_telegram_webhook_handles_math_shortcut_without_llm() -> None:
     assert fake_user_session_repository.saved_last_results[0]["data"]["rows"] == [{"value": 3085489.0}]
 
 
+def test_telegram_webhook_math_shortcut_saves_and_uses_metric_clarification() -> None:
+    fake_user_session_repository.last_result = {
+        "kind": "sql_result",
+        "rows": [{"model_revenue": 100, "model_npv": 50}],
+        "row_count": 1,
+        "metrics": ["model_revenue", "model_npv"],
+        "columns": ["model_revenue", "model_npv"],
+    }
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1030,
+            "message": {
+                "message_id": 83,
+                "date": 1710000000,
+                "chat": {"id": 914, "type": "private"},
+                "from": {
+                    "id": 150,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "подели на 2",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["math_shortcut"] == "handled"
+    assert body["last_result_saved"] is False
+    assert fake_user_session_repository.state["pending_math_shortcut"] == {"type": "divide", "right": 2.0}
+    assert "выручка или NPV" in fake_telegram_client.messages[0][1]
+
+    fake_telegram_client.messages.clear()
+    fake_user_session_repository.saved_last_results.clear()
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1031,
+            "message": {
+                "message_id": 84,
+                "date": 1710000001,
+                "chat": {"id": 914, "type": "private"},
+                "from": {
+                    "id": 150,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "выручка",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["math_shortcut"] == "handled"
+    assert body["last_result_saved"] is True
+    assert "pending_math_shortcut" not in fake_user_session_repository.state
+    assert fake_telegram_client.messages == [(914, "Результат: 50 руб.")]
+    assert fake_user_session_repository.saved_last_results[0]["data"]["rows"] == [{"value": 50.0}]
+
+
 def test_telegram_webhook_handles_percent_deviation_shortcut_missing_data() -> None:
     fake_user_session_repository.last_result = {
         "kind": "sql_result",
@@ -1544,6 +1611,450 @@ def test_telegram_webhook_corrects_failed_roadmap_metric_to_steps_view() -> None
     assert FAILED_QUERY_STATE not in fake_user_session_repository.state
 
 
+def test_telegram_webhook_treats_model_summary_alias_as_new_model_query() -> None:
+    fake_user_session_repository.last_result = {
+        "kind": "sql_result",
+        "rows": [
+            {
+                "model_revenue": 11166655390.46,
+                "model_cost_of_sales": -6900517274,
+                "model_gross_profit": 4266138116.46,
+                "model_net_profit": 1287811999.18,
+                "model_npv": -346372619.92,
+            },
+        ],
+        "row_count": 1,
+        "metrics": [
+            "model_revenue",
+            "model_cost_of_sales",
+            "model_gross_profit",
+            "model_net_profit",
+            "model_npv",
+        ],
+        "columns": [
+            "model_revenue",
+            "model_cost_of_sales",
+            "model_gross_profit",
+            "model_net_profit",
+            "model_npv",
+        ],
+    }
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1048,
+            "message": {
+                "message_id": 101,
+                "date": 1710000000,
+                "chat": {"id": 932, "type": "private"},
+                "from": {
+                    "id": 168,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "краткая сводка модели",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    assert fake_domain_resolver.calls[0].report_type == "model"
+    assert fake_domain_resolver.calls[0].view == "model_summary"
+    assert fake_domain_resolver.calls[0].metrics == [
+        "model_revenue",
+        "model_cost_of_sales",
+        "model_gross_profit",
+        "model_net_profit",
+        "model_npv",
+    ]
+    assert fake_user_session_repository.state["report_type"] == "model"
+    assert fake_user_session_repository.state["view"] == "model_summary"
+
+
+def test_telegram_webhook_treats_model_period_without_metric_as_new_summary_query() -> None:
+    fake_user_session_repository.state = {
+        "report_type": "model",
+        "project": "obvodny",
+        "period": {"label": "февраль"},
+        "metrics": ["model_npv"],
+        "view": "model_kpi",
+        "filters": {"scenario": "current"},
+        "group_by": [],
+        "last_intent": "data_query",
+        "awaiting_clarification": False,
+    }
+    fake_user_session_repository.last_result = {
+        "kind": "sql_result",
+        "rows": [{"model_npv": -335889498.39}],
+        "row_count": 1,
+        "metrics": ["model_npv"],
+        "columns": ["model_npv"],
+    }
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1050,
+            "message": {
+                "message_id": 103,
+                "date": 1710000000,
+                "chat": {"id": 934, "type": "private"},
+                "from": {
+                    "id": 170,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "модель март",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    assert fake_domain_resolver.calls[0].report_type == "model"
+    assert fake_domain_resolver.calls[0].view == "model_summary"
+    assert fake_domain_resolver.calls[0].period.label == "март"
+    assert fake_domain_resolver.calls[0].metrics == [
+        "model_revenue",
+        "model_cost_of_sales",
+        "model_gross_profit",
+        "model_net_profit",
+        "model_npv",
+    ]
+    assert fake_user_session_repository.state["view"] == "model_summary"
+    assert fake_user_session_repository.state["period"]["label"] == "март"
+    assert fake_user_session_repository.state["metrics"] == [
+        "model_revenue",
+        "model_cost_of_sales",
+        "model_gross_profit",
+        "model_net_profit",
+        "model_npv",
+    ]
+
+
+def test_telegram_webhook_treats_model_snapshot_alias_as_new_dimension_query() -> None:
+    fake_user_session_repository.last_result = {
+        "kind": "sql_result",
+        "rows": [{"model_revenue": 11166655390.46, "model_npv": -346372619.92}],
+        "row_count": 1,
+        "metrics": ["model_revenue", "model_npv"],
+        "columns": ["model_revenue", "model_npv"],
+    }
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1049,
+            "message": {
+                "message_id": 102,
+                "date": 1710000000,
+                "chat": {"id": 933, "type": "private"},
+                "from": {
+                    "id": 169,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "какие срезы модели есть?",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    assert fake_domain_resolver.calls[0].report_type == "model"
+    assert fake_domain_resolver.calls[0].intent == "dimension_query"
+    assert fake_domain_resolver.calls[0].view == "model_available_snapshots"
+    assert fake_domain_resolver.calls[0].dimension == "snapshot_month"
+    assert fake_domain_resolver.calls[0].metrics == []
+    assert fake_user_session_repository.state["report_type"] == "model"
+    assert fake_user_session_repository.state["view"] == "model_available_snapshots"
+    assert fake_user_session_repository.state["dimension"] == "snapshot_month"
+
+
+def test_telegram_webhook_blocks_model_sensitive_request_without_llm() -> None:
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1051,
+            "message": {
+                "message_id": 104,
+                "date": 1710000000,
+                "chat": {"id": 935, "type": "private"},
+                "from": {
+                    "id": 171,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "модель покажи контакты",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    assert fake_calculation_engine.calls == []
+    assert fake_domain_resolver.calls == []
+    assert fake_telegram_client.messages
+    assert "по правилам безопасности" in fake_telegram_client.messages[0][1]
+
+
+def test_telegram_webhook_model_available_metrics_context_does_not_send_pdf() -> None:
+    fake_user_session_repository.state = {
+        "report_type": "model",
+        "project": "obvodny",
+        "metrics": ["model_npv"],
+        "view": "model_kpi",
+        "filters": {"scenario": "current"},
+        "group_by": [],
+        "last_intent": "data_query",
+        "awaiting_clarification": False,
+    }
+    fake_calculation_engine.result = SimpleNamespace(
+        kind="sql_result",
+        rows=[{"metric": f"Показатель {index}"} for index in range(40)],
+        row_count=40,
+        metrics=[],
+        columns=["metric"],
+        operation=None,
+    )
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1052,
+            "message": {
+                "message_id": 105,
+                "date": 1710000000,
+                "chat": {"id": 936, "type": "private"},
+                "from": {
+                    "id": 172,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "какие показатели есть?",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    assert fake_telegram_client.documents == []
+    assert fake_telegram_client.messages
+    assert fake_domain_resolver.calls[0].report_type == "model"
+    assert fake_domain_resolver.calls[0].view == "model_available_metrics"
+
+
+def test_telegram_webhook_model_raw_sheet_list_without_llm() -> None:
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 10520,
+            "message": {
+                "message_id": 1050,
+                "date": 1710000000,
+                "chat": {"id": 9360, "type": "private"},
+                "from": {
+                    "id": 1720,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "какие листы есть в модели?",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    assert fake_domain_resolver.calls[0].report_type == "model"
+    assert fake_domain_resolver.calls[0].intent == "dimension_query"
+    assert fake_domain_resolver.calls[0].view == "model_raw_sheets"
+    assert fake_domain_resolver.calls[0].dimension == "raw_sheet"
+
+
+def test_telegram_webhook_model_raw_rows_without_llm() -> None:
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 10521,
+            "message": {
+                "message_id": 1051,
+                "date": 1710000000,
+                "chat": {"id": 9361, "type": "private"},
+                "from": {
+                    "id": 1721,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "модель финмодель апрель",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    assert fake_domain_resolver.calls[0].report_type == "model"
+    assert fake_domain_resolver.calls[0].view == "model_raw_rows"
+    assert fake_domain_resolver.calls[0].filters == {"raw_sheet": "financial_model"}
+    assert fake_domain_resolver.calls[0].period.label == "апрель"
+
+
+def test_telegram_webhook_model_short_metric_context_replaces_metric_without_llm() -> None:
+    fake_user_session_repository.state = {
+        "report_type": "model",
+        "project": "obvodny",
+        "period": {"label": "апрель"},
+        "metrics": ["model_npv"],
+        "view": "model_kpi",
+        "filters": {"scenario": "current"},
+        "group_by": [],
+        "last_intent": "data_query",
+        "awaiting_clarification": False,
+    }
+    fake_calculation_engine.result = SimpleNamespace(
+        kind="sql_result",
+        rows=[{"model_roe": 45.46}],
+        row_count=1,
+        metrics=["model_roe"],
+        columns=["model_roe"],
+        operation=None,
+    )
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1053,
+            "message": {
+                "message_id": 106,
+                "date": 1710000000,
+                "chat": {"id": 937, "type": "private"},
+                "from": {
+                    "id": 173,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "ROE",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    assert fake_calculation_engine.calls[0]["query_frame"].metrics == ["model_roe"]
+
+
+def test_telegram_webhook_model_short_metric_context_keeps_period() -> None:
+    fake_user_session_repository.state = {
+        "report_type": "model",
+        "project": "obvodny",
+        "period": {"label": "февраль"},
+        "metrics": ["model_revenue"],
+        "view": "model_kpi",
+        "filters": {"scenario": "current"},
+        "group_by": [],
+        "last_intent": "data_query",
+        "awaiting_clarification": False,
+    }
+    fake_calculation_engine.result = SimpleNamespace(
+        kind="sql_result",
+        rows=[{"model_npv": -335889498.39}],
+        row_count=1,
+        metrics=["model_npv"],
+        columns=["model_npv"],
+        operation=None,
+    )
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1055,
+            "message": {
+                "message_id": 108,
+                "date": 1710000000,
+                "chat": {"id": 939, "type": "private"},
+                "from": {
+                    "id": 175,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "а NPV?",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_llm_parser.inputs == []
+    query_frame = fake_calculation_engine.calls[0]["query_frame"]
+    assert query_frame.metrics == ["model_npv"]
+    assert query_frame.period.label == "февраль"
+
+
+def test_telegram_webhook_model_unknown_metric_does_not_return_summary() -> None:
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1054,
+            "message": {
+                "message_id": 107,
+                "date": 1710000000,
+                "chat": {"id": 938, "type": "private"},
+                "from": {
+                    "id": 174,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "модель космический показатель апрель",
+            },
+        },
+    )
+
+    body = response.json()
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert fake_calculation_engine.calls == []
+    assert fake_telegram_client.messages
+    assert "Не нашел такой показатель в модели" in fake_telegram_client.messages[0][1]
+
+
 def test_telegram_webhook_rejects_floor_question_misread_as_roadmap() -> None:
     fake_llm_parser.response = LLMParsedResponse(
         intent="data_query",
@@ -1634,10 +2145,10 @@ def test_telegram_webhook_allows_full_query_after_compatibility_error() -> None:
     assert CONTEXT_BLOCKED_AFTER_ERROR not in fake_user_session_repository.state
 
 
-def test_telegram_webhook_sends_not_connected_report_message_before_metric_clarification() -> None:
+def test_telegram_webhook_routes_sales_plan_execution_report() -> None:
     fake_llm_parser.response = LLMParsedResponse(
         intent="data_query",
-        state_delta={"report_type": "sales_report", "period": {"label": "may"}},
+        state_delta={"report_type": "sales_plan_execution", "period": {"label": "may"}},
         confidence=0.9,
     )
 
@@ -1655,7 +2166,7 @@ def test_telegram_webhook_sends_not_connected_report_message_before_metric_clari
                     "first_name": "Test",
                     "username": "tester",
                 },
-                "text": "sales report revenue may",
+                "text": "sales plan execution may",
             },
         },
     )
@@ -1664,15 +2175,16 @@ def test_telegram_webhook_sends_not_connected_report_message_before_metric_clari
     saved_state = fake_user_session_repository.saved_states[0]["data"]
 
     assert response.status_code == 200
-    assert body["query_ready"] is False
+    assert body["query_ready"] is True
     assert body["missing_fields"] == []
-    assert body["metrics_valid"] is False
-    assert body["metric_errors"] == ["report_type_not_connected"]
+    assert body["metrics_valid"] is True
+    assert body["metric_errors"] == []
     assert body["telegram_response_sent"] is True
-    assert fake_telegram_client.messages == [(914, REPORT_NOT_CONNECTED_MESSAGE)]
-    assert fake_domain_resolver.calls == []
-    assert fake_calculation_engine.calls == []
-    assert saved_state["report_type"] is None
+    assert fake_telegram_client.messages
+    assert fake_telegram_client.messages[0][0] == 914
+    assert fake_domain_resolver.calls[0].report_type == "sales_plan_execution"
+    assert fake_calculation_engine.calls[0]["query_frame"].report_type == "sales_plan_execution"
+    assert saved_state["report_type"] == "sales_plan_execution"
     assert saved_state["awaiting_clarification"] is False
 
 

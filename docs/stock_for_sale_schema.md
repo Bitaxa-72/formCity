@@ -68,7 +68,43 @@
 - `developer_balance`
 - `other`
 
-## Будущий маппинг запросов
+## Подключенный маппинг запросов
+
+Отчет подключен к ответам бота через `report_type=stock_for_sale`.
+
+Публичные метрики:
+
+- `stock_ddu_amount` - сумма ДДУ
+- `stock_dupt_markup_amount` - наценка ДУПТ
+- `stock_total_amount` - сумма ДДУ + ДУПТ
+- `stock_area_sqm` - площадь
+- `stock_unit_count` - количество объектов
+- `stock_ddu_price_per_sqm` - цена ДДУ за м2
+- `stock_dupt_price_per_sqm` - цена ДУПТ за м2
+- `stock_total_price_per_sqm` - общая цена за м2
+
+Подключенные view:
+
+- `stock_summary` - строка `Всего`
+- `stock_amounts` - суммы ДДУ, ДУПТ и итого
+- `stock_price_per_sqm` - цены за м2
+- `stock_by_floors` - детализация по этажам
+- `stock_in_work` - строки в работе
+- `stock_details` - детальные строки
+- `stock_apartments` - апартаменты
+- `stock_storage` - кладовые
+- `stock_restaurants` - рестораны
+- `stock_first_floor` - первый этаж
+- `stock_available_periods` - доступные срезы
+- `stock_available_property_types` - доступные типы объектов
+- `stock_available_row_types` - доступные виды строк
+- `stock_available_floors` - доступные этажи
+
+Если период не указан, backend берет последний доступный срез и указывает это в ответе.
+
+По умолчанию используется `row_type=total`, чтобы не смешивать итоговые, категорийные и детальные строки.
+
+## Примеры маппинга
 
 Примеры:
 

@@ -62,6 +62,13 @@ COLUMN_LABELS = {
     "model_total_area": "Общая площадь",
     "model_units_count": "Количество помещений",
     "model_pir": "ПИР",
+    "raw_sheet": "Лист",
+    "row_count": "Строк",
+    "cell_count": "Ячеек",
+    "row_number": "Номер строки",
+    "row_label": "Название строки",
+    "visible_cells": "Открытых ячеек",
+    "values_preview": "Значения",
 }
 ARTICLE_KIND_LABELS = {
     "balance_start": "Остаток на начало",
@@ -69,6 +76,18 @@ ARTICLE_KIND_LABELS = {
     "payment_total": "Итого платежи",
     "balance_end": "Остаток на конец",
     "detail": "Статья расходов",
+}
+RAW_SHEET_LABELS = {
+    "consolidation": "Для консолидации",
+    "для консолидации": "Для консолидации",
+    "консолидация": "Для консолидации",
+    "financial_model": "Финмодель",
+    "финмодель": "Финмодель",
+    "фин модель": "Финмодель",
+    "финансовая модель": "Финмодель",
+    "remains": "Остатки",
+    "остатки": "Остатки",
+    "остаток": "Остатки",
 }
 MONEY_COLUMNS = {
     "plan",
@@ -125,6 +144,9 @@ def format_value(column: str, value: Any) -> str:
         return PROJECT_LABELS.get(value, value)
     if column == "article_kind" and isinstance(value, str):
         return ARTICLE_KIND_LABELS.get(value, value)
+    if column == "raw_sheet" and isinstance(value, str):
+        normalized = " ".join(value.strip().lower().replace("ё", "е").split())
+        return RAW_SHEET_LABELS.get(normalized, value)
     if column in MONEY_COLUMNS and isinstance(value, int | float):
         return f"{format_number(value)} руб."
     if isinstance(value, int | float):
@@ -146,6 +168,12 @@ def build_report_title_lines(source: dict[str, Any]) -> list[str]:
         article = filters.get("article")
         if isinstance(article, str) and article:
             lines.append(f"Статья: {article}")
+        raw_sheet = filters.get("raw_sheet")
+        if isinstance(raw_sheet, str) and raw_sheet:
+            lines.append(f"Лист: {format_value('raw_sheet', raw_sheet)}")
+        raw_query = filters.get("raw_query")
+        if isinstance(raw_query, str) and raw_query:
+            lines.append(f"Поиск: {raw_query}")
     return lines
 
 

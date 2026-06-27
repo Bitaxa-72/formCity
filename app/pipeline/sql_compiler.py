@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 from app.pipeline.metric_resolver import MetricResolution
 from app.pipeline.query_frame import QueryFrame
+from app.reports.model.catalog import MODEL_RAW_VIEWS
 from app.reports.registry import SQL_TEMPLATES
 from app.reports.sql import ReportSQLTemplate
 
@@ -18,6 +19,130 @@ class SQLQuery(BaseModel):
     table: str
     metrics: list[str]
     group_by: list[str]
+
+
+RAW_SHEET_ALIASES = {
+    "consolidation": "consolidation",
+    "для консолидации": "consolidation",
+    "консолидация": "consolidation",
+    "financial_model": "financial_model",
+    "финмодель": "financial_model",
+    "фин модель": "financial_model",
+    "финансовая модель": "financial_model",
+    "remains": "remains",
+    "остатки": "remains",
+    "остаток": "remains",
+}
+
+
+def normalize_raw_sheet(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.strip().lower().replace("ё", "е").split())
+    return RAW_SHEET_ALIASES.get(normalized)
+
+
+def append_model_raw_common_filters(frame: QueryFrame, alias: str, where_parts: list[str], params: dict[str, Any]) -> None:
+    if frame.project and frame.project != "all":
+        where_parts.append(f"{alias}.project = :project")
+        params["project"] = frame.project
+    if frame.period.from_date:
+        where_parts.append(f"{alias}.snapshot_month >= :date_from")
+        params["date_from"] = frame.period.from_date
+    if frame.period.to:
+        where_parts.append(f"{alias}.snapshot_month <= :date_to")
+        params["date_to"] = frame.period.to
+
+    sheet_kind = normalize_raw_sheet(frame.filters.get("raw_sheet"))
+    if sheet_kind:
+        where_parts.append(f"{alias}.sheet_kind = :raw_sheet")
+        params["raw_sheet"] = sheet_kind
+
+
+def compile_model_raw_sheets_sql(frame: QueryFrame) -> SQLQuery:
+    where_parts: list[str] = []
+    params: dict[str, Any] = {}
+    append_model_raw_common_filters(frame, "s", where_parts, params)
+    where_sql = "\nWHERE " + "\n  AND ".join(where_parts) if where_parts else ""
+    return SQLQuery(
+        sql=(
+            "SELECT DISTINCT\n"
+            "  s.sheet_name AS raw_sheet,\n"
+            "  s.row_count AS row_count,\n"
+            "  s.cell_count AS cell_count\n"
+            "FROM model_raw_sheets s"
+            f"{where_sql}\n"
+            "ORDER BY s.sheet_name"
+        ),
+        params=params,
+        table="model_raw_sheets",
+        metrics=[],
+        group_by=["raw_sheet"],
+    )
+
+
+def compile_model_raw_rows_sql(frame: QueryFrame) -> SQLQuery:
+    where_parts = ["r.is_sensitive = 0"]
+    params: dict[str, Any] = {}
+    append_model_raw_common_filters(frame, "r", where_parts, params)
+
+    raw_query = frame.filters.get("raw_query")
+    if isinstance(raw_query, str) and raw_query.strip():
+        where_parts.append(
+            "(\n"
+            "    r.row_label LIKE :raw_query\n"
+            "    OR EXISTS (\n"
+            "      SELECT 1\n"
+            "      FROM model_raw_cells sc\n"
+            "      WHERE sc.project = r.project\n"
+            "        AND sc.snapshot_month = r.snapshot_month\n"
+            "        AND sc.source_file = r.source_file\n"
+            "        AND sc.sheet_name = r.sheet_name\n"
+            "        AND sc.row_number = r.row_number\n"
+            "        AND sc.is_sensitive = 0\n"
+            "        AND sc.value_text LIKE :raw_query\n"
+            "    )\n"
+            "  )",
+        )
+        params["raw_query"] = f"%{raw_query.strip()}%"
+
+    where_sql = "\nWHERE " + "\n  AND ".join(where_parts)
+    return SQLQuery(
+        sql=(
+            "SELECT\n"
+            "  r.sheet_name AS raw_sheet,\n"
+            "  r.row_number AS row_number,\n"
+            "  r.row_label AS row_label,\n"
+            "  COUNT(c.id) AS visible_cells,\n"
+            "  GROUP_CONCAT(\n"
+            "    c.column_letter || ': ' || COALESCE(c.value_text, CAST(c.value_number AS TEXT), c.value_date, CAST(c.value_bool AS TEXT)),\n"
+            "    ' | '\n"
+            "  ) AS values_preview\n"
+            "FROM model_raw_rows r\n"
+            "LEFT JOIN model_raw_cells c\n"
+            "  ON c.project = r.project\n"
+            "  AND c.snapshot_month = r.snapshot_month\n"
+            "  AND c.source_file = r.source_file\n"
+            "  AND c.sheet_name = r.sheet_name\n"
+            "  AND c.row_number = r.row_number\n"
+            "  AND c.is_sensitive = 0"
+            f"{where_sql}\n"
+            "GROUP BY r.sheet_name, r.row_number, r.row_label\n"
+            "ORDER BY r.sheet_name, r.row_number"
+        ),
+        params=params,
+        table="model_raw_rows",
+        metrics=[],
+        group_by=["raw_row"],
+    )
+
+
+def compile_model_raw_sql(frame: QueryFrame) -> SQLQuery:
+    if frame.view == "model_raw_sheets":
+        return compile_model_raw_sheets_sql(frame)
+    if frame.view in {"model_raw_rows", "model_raw_search"}:
+        return compile_model_raw_rows_sql(frame)
+    raise SQLCompileError("unknown_model_raw_view")
 
 
 def build_filter_clause(column: str, param_name: str, value: Any) -> tuple[str, dict[str, Any]]:
@@ -41,6 +166,10 @@ def build_contains_filter_clause(column: str, param_name: str, value: Any) -> tu
     return f"{column} LIKE :{param_name}", {param_name: f'%{value.strip()}%'}
 
 
+def build_not_null_filter_clause(column: str) -> tuple[str, dict[str, Any]]:
+    return f"({column} IS NOT NULL AND {column} != '')", {}
+
+
 def collect_where_parts(frame: QueryFrame, template: ReportSQLTemplate) -> tuple[list[str], dict[str, Any]]:
     where_parts = []
     params: dict[str, Any] = {}
@@ -62,7 +191,9 @@ def collect_where_parts(frame: QueryFrame, template: ReportSQLTemplate) -> tuple
         column = template.filter_columns.get(filter_name)
         if column is None:
             raise SQLCompileError("unknown_filter")
-        if filter_name.endswith("_contains"):
+        if filter_name.endswith("_not_null"):
+            clause, filter_params = build_not_null_filter_clause(column)
+        elif filter_name.endswith("_contains"):
             clause, filter_params = build_contains_filter_clause(column, f"filter_{filter_name}", value)
         else:
             clause, filter_params = build_filter_clause(column, f"filter_{filter_name}", value)
@@ -155,6 +286,9 @@ def compile_sql(frame: QueryFrame, metric_resolution: MetricResolution) -> SQLQu
         raise SQLCompileError("metric_resolution_not_valid")
     if frame.operation:
         raise SQLCompileError("operation_query_not_supported")
+
+    if frame.report_type == "model" and frame.view in MODEL_RAW_VIEWS:
+        return compile_model_raw_sql(frame)
 
     template = SQL_TEMPLATES.get(frame.report_type or "")
     if template is None:

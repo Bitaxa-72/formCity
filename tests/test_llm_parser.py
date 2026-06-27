@@ -114,6 +114,26 @@ def test_llm_parsed_response_accepts_payment_calendar_view() -> None:
     assert parsed.state_delta.view == "summary"
 
 
+def test_llm_parsed_response_accepts_model_raw_view() -> None:
+    parsed = LLMParsedResponse.model_validate(
+        {
+            "intent": "data_query",
+            "state_delta": {
+                "report_type": "model",
+                "view": "model_raw_rows",
+                "filters": {"raw_sheet": "финмодель"},
+            },
+            "operation": None,
+            "needs_clarification": False,
+            "clarification_question": None,
+            "confidence": 0.9,
+        },
+    )
+
+    assert parsed.state_delta.view == "model_raw_rows"
+    assert parsed.state_delta.filters == {"raw_sheet": "финмодель"}
+
+
 def test_normalize_llm_payload_infers_data_query_intent() -> None:
     payload = normalize_llm_payload(
         {

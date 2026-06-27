@@ -37,7 +37,7 @@ def test_resolve_metrics_rejects_unknown_report_type() -> None:
     assert resolution.clarification_question == "Уточните тип отчета."
 
 
-def test_resolve_metrics_rejects_not_connected_report_type() -> None:
+def test_resolve_metrics_rejects_metric_for_summary_report_type() -> None:
     frame = build_query_frame(
         {
             "last_intent": "data_query",
@@ -49,7 +49,7 @@ def test_resolve_metrics_rejects_not_connected_report_type() -> None:
     resolution = resolve_metrics(frame)
 
     assert resolution.valid is False
-    assert resolution.errors == ["report_type_not_connected"]
+    assert resolution.errors == ["metric_not_allowed_for_report_type"]
     assert resolution.clarification_question == REPORT_NOT_CONNECTED_MESSAGE
 
 

@@ -28,6 +28,7 @@ repo/
     architecture_scheme.html - полная визуальная схема архитектуры и развилок
     context_flow.md - схема жизни контекста и правила переходов
     debt_bookings_schema.md - схема БД для ДЗ и броней
+    model_schema.md - схема БД и публичных ключей модели
     non_project_expenses_schema.md - схема БД для непроектных расходов
     sales_plan_execution_schema.md - схема БД для исполнения плана продаж
     sales_report_schema.md - схема БД для отчета о продажах
@@ -88,6 +89,8 @@ repo/
     versions/ - версии миграций
       20260622_0001_user_session.py - создает таблицы user session
       20260622_0002_payment_calendar_facts.py - создает таблицу платежного календаря
+      20260625_0003_roadmap_steps.py - создает таблицы дорожной карты
+      20260625_0004_model_tables.py - создает расчетные таблицы модели
       20260625_0005_non_project_expenses.py - создает таблицы непроектных расходов
       20260625_0006_stock_for_sale.py - создает таблицы остатков в продаже
       20260625_0007_sales_report.py - создает таблицы отчета о продажах
@@ -95,6 +98,7 @@ repo/
       20260626_0009_agents_report.py - создает таблицы отчета по агентам
       20260626_0010_debt_bookings.py - создает таблицы ДЗ и броней
       20260626_0011_summary_tables.py - создает таблицы сводного отчета
+      20260626_0012_model_raw_tables.py - создает raw-таблицы модели
     env.py - Alembic env, берет DATABASE_URL из config
   tests/ - тесты проекта
     test_agents_report_importer.py - проверяет импорт отчета по агентам
@@ -379,12 +383,89 @@ report_type
     "filters": {}
   },
   "model": {
-    "status": "planned",
-    "projects": ["all", "obvodny", "moskovsky", "evgenievsky"],
-    "metrics": [],
-    "dimensions": [],
-    "group_by": [],
-    "filters": {}
+    "status": "active",
+    "tables": [
+      "model_sources",
+      "model_monthly_facts",
+      "model_kpi_facts",
+      "model_comparison_facts",
+      "model_passport_facts",
+      "model_assumption_facts",
+      "model_raw_sheets",
+      "model_raw_rows",
+      "model_raw_cells"
+    ],
+    "projects": {
+      "obvodny": {
+        "label": "Обводный"
+      }
+    },
+    "metrics": {
+      "model_revenue": {
+        "label": "выручка",
+        "unit": "rub"
+      },
+      "model_cost_of_sales": {
+        "label": "себестоимость продаж",
+        "unit": "rub"
+      },
+      "model_gross_profit": {
+        "label": "валовая прибыль",
+        "unit": "rub"
+      },
+      "model_net_profit": {
+        "label": "чистая прибыль",
+        "unit": "rub"
+      },
+      "model_npv": {
+        "label": "NPV",
+        "unit": "rub"
+      },
+      "model_roe": {
+        "label": "ROE",
+        "unit": "percent"
+      },
+      "model_llcr": {
+        "label": "LLCR",
+        "unit": "ratio"
+      },
+      "model_total_area": {
+        "label": "общая площадь",
+        "unit": "square_meter"
+      },
+      "model_units_count": {
+        "label": "количество помещений",
+        "unit": "count"
+      },
+      "model_pir": {
+        "label": "ПИР",
+        "unit": "rub"
+      }
+    },
+    "dimensions": {
+      "metric": {
+        "label": "показатель",
+        "column": "metric_name"
+      },
+      "snapshot_month": {
+        "label": "срез модели",
+        "column": "snapshot_month"
+      }
+    },
+    "group_by": ["month", "metric", "snapshot_month"],
+    "filters": {
+      "project": ["obvodny"],
+      "period": "snapshot_month",
+      "scenario": ["current", "plan"],
+      "metric_key": "string_or_list"
+    },
+    "raw_layers": {
+      "consolidation": "Для консолидации",
+      "financial_model": "Финмодель",
+      "remains": "Остатки",
+      "public_answer": "safe_views_enabled",
+      "views": ["model_raw_sheets", "model_raw_rows", "model_raw_search"]
+    }
   },
   "payment_calendar": {
     "status": "active",
@@ -520,7 +601,9 @@ filters ограничивают строки перед расчетом
 data_query начинает новый запрос и сбрасывает старый контекст запроса
 dimension_query начинает новый запрос и сбрасывает старый контекст запроса
 context_query сохраняет старый контекст и применяет только новые поля
-если период не указан в новом data_query или dimension_query, используется весь доступный период
+если период не указан в новом data_query или dimension_query, правило периода выбирается по отчету
+для payment_calendar используется весь доступный период
+для roadmap и model используется последний доступный срез
 если пользователь пишет "за весь период", "за все время" или "без периода", LLM возвращает period.mode = all
 если меняется report_type, очищаются period, metrics, dimension, filters, group_by, sort, limit
 если приходит dimension, очищаются metrics и group_by
@@ -597,9 +680,19 @@ all - все проекты
 plan - план
 fact - факт
 deviation - отклонение
+model_revenue - выручка модели
+model_cost_of_sales - себестоимость продаж модели
+model_gross_profit - валовая прибыль модели
+model_net_profit - чистая прибыль модели
+model_npv - NPV модели
+model_roe - ROE модели
+model_llcr - LLCR модели
+model_total_area - общая площадь модели
+model_units_count - количество помещений модели
+model_pir - ПИР модели
 ```
 
-Сейчас активны только метрики платежного календаря. Остальные метрики будут добавляться по мере подключения новых таблиц к БД.
+Сейчас активны метрики платежного календаря, дорожной карты, модели и непроектных расходов. Для остальных отчетов метрики будут подключаться по мере настройки backend-логики.
 
 ### `dimension`
 
@@ -608,6 +701,9 @@ article - статьи платежного календаря
 article_kind - типы строк платежного календаря
 project - проекты
 period_month - месяцы
+snapshot_month - срезы модели
+metric - показатели модели
+raw_sheet - raw-листы модели
 ```
 
 `dimension` используется для запросов без расчета суммы: например, "какие статьи расходов есть?".

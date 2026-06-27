@@ -50,3 +50,23 @@ def test_sensitive_columns_are_hidden_and_text_values_are_masked() -> None:
 
 def test_sanitize_text_masks_contacts() -> None:
     assert sanitize_text("phone +7 999 111-22-33 and a@b.ru") == "phone [contact hidden] and [contact hidden]"
+
+
+def test_sanitize_text_does_not_mask_decimal_numbers() -> None:
+    text = "Коэффициент: 0.665766986557602, сумма: 123456789.12"
+
+    sanitized = sanitize_text(text)
+
+    assert "0.665766986557602" in sanitized
+    assert "123456789.12" in sanitized
+    assert "[contact hidden]" not in sanitized
+
+
+def test_sanitize_text_masks_person_names() -> None:
+    text = "Ответственный Романников С.В., клиент Иванов Иван Иванович"
+
+    sanitized = sanitize_text(text)
+
+    assert "Романников" not in sanitized
+    assert "Иванов Иван Иванович" not in sanitized
+    assert sanitized.count("[person hidden]") == 2

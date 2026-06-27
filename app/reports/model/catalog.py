@@ -2,8 +2,9 @@ from app.reports.common import MetricSpec
 
 
 MODEL_PROJECTS = {"obvodny"}
-MODEL_FILTERS = {"project", "period", "scenario", "metric_key", "snapshot_month"}
+MODEL_FILTERS = {"project", "period", "scenario", "metric_key", "snapshot_month", "raw_sheet", "raw_query"}
 MODEL_GROUP_BY = {"month", "metric", "snapshot_month"}
+MODEL_RAW_VIEWS = {"model_raw_sheets", "model_raw_rows", "model_raw_search"}
 
 MODEL_SUMMARY_METRICS = [
     "model_revenue",

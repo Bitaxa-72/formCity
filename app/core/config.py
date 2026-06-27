@@ -1,3 +1,4 @@
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -80,11 +81,25 @@ def parse_allowed_usernames(value: str | None) -> set[str]:
     if not value:
         return set()
 
+    stripped_value = value.strip()
+    if stripped_value.startswith("["):
+        try:
+            parsed_value = json.loads(stripped_value)
+        except json.JSONDecodeError:
+            parsed_value = None
+        if isinstance(parsed_value, list):
+            return {
+                normalized
+                for item in parsed_value
+                if isinstance(item, str)
+                if (normalized := normalize_username(item))
+            }
+
     raw_items = value.replace("\n", ",").replace(" ", ",").split(",")
     return {
         normalized
         for item in raw_items
-        if (normalized := normalize_username(item))
+        if (normalized := normalize_username(item.strip().strip("\"'[]")))
     }
 
 

@@ -6,9 +6,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from time import time
 from typing import Any
 from xml.etree import ElementTree
 
+from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
@@ -20,6 +23,9 @@ from app.db.models import (
     ModelKpiFact,
     ModelMonthlyFact,
     ModelPassportFact,
+    ModelRawCell,
+    ModelRawRow,
+    ModelRawSheet,
     ModelSource,
 )
 from app.importers.payment_calendar import excel_serial_to_month, read_xlsx_rows
@@ -35,6 +41,14 @@ SHEET_KPI_PLAN = "NEWKPI's_\u041f\u041b\u0410\u041d"
 SHEET_COMPARISON = "\u0421\u0440\u0430\u0432\u043d\u0435\u043d\u0438\u0435"
 SHEET_PASSPORT = "\u041f\u0430\u0441\u043f\u043e\u0440\u0442"
 SHEET_RATES = "\u041f\u0440\u043e\u0446\u0435\u043d\u0442\u044b"
+SHEET_CONSOLIDATION = "\u0414\u043b\u044f \u043a\u043e\u043d\u0441\u043e\u043b\u0438\u0434\u0430\u0446\u0438\u0438"
+SHEET_FINMODEL = "\u0424\u0438\u043d\u043c\u043e\u0434\u0435\u043b\u044c"
+SHEET_REMAINS = "\u041e\u0441\u0442\u0430\u0442\u043a\u0438"
+RAW_MODEL_SHEETS = {
+    SHEET_CONSOLIDATION: "consolidation",
+    SHEET_FINMODEL: "financial_model",
+    SHEET_REMAINS: "remains",
+}
 MODEL_FILE_MARKER = "\u041c\u043e\u0434\u0435\u043b\u044c"
 SNAPSHOT_RE = re.compile(r"\b(\d{2})\.(\d{2})\b")
 SECTION_CODE_RE = re.compile(r"^\d+\.?$")
@@ -69,6 +83,9 @@ class ModelImportResult:
     comparison: int
     passport: int
     assumptions: int
+    raw_sheets: int = 0
+    raw_rows: int = 0
+    raw_cells: int = 0
 
 
 def parse_decimal(value: Any) -> Decimal | None:
@@ -130,7 +147,7 @@ def find_xlsx_files(source: Path) -> list[Path]:
 
 
 def row_sensitive_kind(*values: Any) -> str | None:
-    text = " ".join(str(value) for value in values if value is not None)
+    text = " ".join(value for value in values if isinstance(value, str) and value.strip())
     return detect_sensitive_kind(text)
 
 
@@ -420,6 +437,118 @@ def read_named_sheet_rows(path: Path, sheet_paths: dict[str, str], sheet_name: s
     return read_xlsx_rows(path, sheet_paths[sheet_name])
 
 
+def serialize_raw_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
+
+def classify_raw_value(value: Any) -> tuple[str, str | None, Decimal | None, date | None, bool | None]:
+    if isinstance(value, bool):
+        return "bool", None, None, None, value
+    if isinstance(value, datetime):
+        return "date", value.isoformat(), None, value.date(), None
+    if isinstance(value, date):
+        return "date", value.isoformat(), None, value, None
+    number = parse_decimal(value)
+    if number is not None:
+        return "number", str(value), number, None, None
+    return "text", normalize_text(value), None, None, None
+
+
+def parse_model_raw_sheets(path: Path, project: str, snapshot_month: date) -> tuple[list[ModelRawSheet], list[ModelRawRow], list[ModelRawCell]]:
+    workbook = load_workbook(path, data_only=True, read_only=True, keep_links=False)
+    sheets: list[ModelRawSheet] = []
+    rows_out: list[ModelRawRow] = []
+    cells_out: list[ModelRawCell] = []
+
+    for worksheet in workbook.worksheets:
+        sheet_kind = RAW_MODEL_SHEETS.get(worksheet.title)
+        if sheet_kind is None:
+            continue
+
+        sheet_row_count = 0
+        sheet_cell_count = 0
+        for row_number, row in enumerate(worksheet.iter_rows(values_only=True), 1):
+            raw_values: dict[str, Any] = {}
+            row_label = None
+            row_kind = None
+            row_cell_count = 0
+
+            for column_number, value in enumerate(row, 1):
+                text = normalize_text(value)
+                if text is None:
+                    continue
+                if row_label is None:
+                    row_label = text
+                raw_values[f"column_{column_number}"] = serialize_raw_value(value)
+                value_type, value_text, value_number, value_date, value_bool = classify_raw_value(value)
+                sensitive_kind = row_sensitive_kind(value)
+                row_kind = row_kind or sensitive_kind
+                cells_out.append(
+                    ModelRawCell(
+                        project=project,
+                        snapshot_month=snapshot_month,
+                        source_file=path.name,
+                        sheet_name=worksheet.title,
+                        sheet_kind=sheet_kind,
+                        row_number=row_number,
+                        column_number=column_number,
+                        column_letter=get_column_letter(column_number),
+                        value_type=value_type,
+                        value_text=value_text,
+                        value_number=value_number,
+                        value_date=value_date,
+                        value_bool=value_bool,
+                        is_sensitive=sensitive_kind is not None,
+                        sensitive_kind=sensitive_kind,
+                    ),
+                )
+                row_cell_count += 1
+                sheet_cell_count += 1
+
+            if row_cell_count == 0:
+                continue
+
+            rows_out.append(
+                ModelRawRow(
+                    project=project,
+                    snapshot_month=snapshot_month,
+                    source_file=path.name,
+                    sheet_name=worksheet.title,
+                    sheet_kind=sheet_kind,
+                    row_number=row_number,
+                    row_label=row_label,
+                    non_empty_cells=row_cell_count,
+                    raw_values=raw_values,
+                    is_sensitive=row_kind is not None,
+                    sensitive_kind=row_kind,
+                ),
+            )
+            sheet_row_count += 1
+
+        sheets.append(
+            ModelRawSheet(
+                project=project,
+                snapshot_month=snapshot_month,
+                source_file=path.name,
+                sheet_name=worksheet.title,
+                sheet_kind=sheet_kind,
+                max_row=worksheet.max_row,
+                max_column=worksheet.max_column,
+                row_count=sheet_row_count,
+                cell_count=sheet_cell_count,
+            ),
+        )
+
+    workbook.close()
+    return sheets, rows_out, cells_out
+
+
 def parse_model_file(path: Path, project: str) -> tuple[ModelSource, list[Any]]:
     snapshot_month = parse_snapshot_month(path)
     sheet_paths = read_sheet_paths(path)
@@ -445,6 +574,10 @@ def parse_model_file(path: Path, project: str) -> tuple[ModelSource, list[Any]]:
         facts.extend(build_passport_facts(read_named_sheet_rows(path, sheet_paths, SHEET_PASSPORT), SHEET_PASSPORT, project, snapshot_month, path.name))
     if SHEET_RATES in sheet_paths:
         facts.extend(build_assumption_facts(read_named_sheet_rows(path, sheet_paths, SHEET_RATES), SHEET_RATES, project, snapshot_month, path.name))
+    raw_sheets, raw_rows, raw_cells = parse_model_raw_sheets(path, project, snapshot_month)
+    facts.extend(raw_sheets)
+    facts.extend(raw_rows)
+    facts.extend(raw_cells)
     return source, facts
 
 
@@ -457,6 +590,9 @@ def replace_model_rows(session: Session, project: str, snapshot_months: set[date
             ModelComparisonFact,
             ModelPassportFact,
             ModelAssumptionFact,
+            ModelRawSheet,
+            ModelRawRow,
+            ModelRawCell,
         ):
             session.execute(
                 delete(model).where(
@@ -472,6 +608,9 @@ def replace_model_rows(session: Session, project: str, snapshot_months: set[date
         ModelComparisonFact,
         ModelPassportFact,
         ModelAssumptionFact,
+        ModelRawSheet,
+        ModelRawRow,
+        ModelRawCell,
     ):
         model_facts = [fact for fact in facts if isinstance(fact, model)]
         if model_facts:
@@ -508,6 +647,9 @@ def delete_model_snapshot(session: Session, project: str, snapshot_month: date) 
         ModelComparisonFact,
         ModelPassportFact,
         ModelAssumptionFact,
+        ModelRawSheet,
+        ModelRawRow,
+        ModelRawCell,
     ):
         session.execute(
             delete(model).where(
@@ -525,6 +667,9 @@ def import_model(session: Session, source: Path, project: str, monthly_mode: str
     comparison_count = 0
     passport_count = 0
     assumption_count = 0
+    raw_sheet_count = 0
+    raw_row_count = 0
+    raw_cell_count = 0
     for file_path in files:
         snapshot_month = parse_snapshot_month(file_path)
         delete_model_snapshot(session, project, snapshot_month)
@@ -644,6 +789,10 @@ def import_model(session: Session, source: Path, project: str, monthly_mode: str
                     )
                 ),
             )
+        raw_sheets, raw_rows, raw_cells = parse_model_raw_sheets(file_path, project, snapshot_month)
+        raw_sheet_count += insert_mapping_batches(session, ModelRawSheet, (object_mapping(item) for item in raw_sheets))
+        raw_row_count += insert_mapping_batches(session, ModelRawRow, (object_mapping(item) for item in raw_rows))
+        raw_cell_count += insert_mapping_batches(session, ModelRawCell, (object_mapping(item) for item in raw_cells))
         session.commit()
 
     return ModelImportResult(
@@ -654,6 +803,9 @@ def import_model(session: Session, source: Path, project: str, monthly_mode: str
         comparison=comparison_count,
         passport=passport_count,
         assumptions=assumption_count,
+        raw_sheets=raw_sheet_count,
+        raw_rows=raw_row_count,
+        raw_cells=raw_cell_count,
     )
 
 
@@ -677,7 +829,10 @@ def main() -> None:
         f"{result.kpi} KPI facts, "
         f"{result.comparison} comparison facts, "
         f"{result.passport} passport facts, "
-        f"{result.assumptions} assumption facts"
+        f"{result.assumptions} assumption facts, "
+        f"{result.raw_sheets} raw sheets, "
+        f"{result.raw_rows} raw rows, "
+        f"{result.raw_cells} raw cells"
     )
 
 

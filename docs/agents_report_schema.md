@@ -89,4 +89,54 @@
 
 Эти поля сохраняются в БД для расчетов, но не должны выводиться пользователю напрямую. Для строк сделок стоит `is_sensitive=true`, а чувствительные поля перечислены в `sensitive_fields`.
 
-В будущей backend-логике можно отвечать агрегатами: количество сделок, сумма агентского вознаграждения, оплачено, остаток к оплате, суммы по бюджетным месяцам. Вывод персональных строк допустим только после отдельной маскировки.
+Backend отвечает только безопасными агрегатами:
+
+- количество сделок
+- площадь
+- база вознаграждения
+- агентское вознаграждение
+- сумма по акту
+- оплачено
+- остаток к оплате
+- суммы ДДУ, уступки и меблировки
+- помесячные графики ДДУ и уступки
+
+Вывод персональных строк, номеров помещений, номеров ДДУ, актов, документов и примечаний запрещен.
+
+## Backend-ключи
+
+`report_type`: `agents_report`
+
+Основные `view`:
+
+- `agents_summary` - безопасная сводка
+- `agents_monthly` - помесячные графики ДДУ и уступки
+- `agents_by_budget_month` - агрегаты по бюджетным месяцам
+- `agents_ddu` - суммы ДДУ, уступки и меблировки
+- `agents_available_snapshots` - доступные срезы
+- `agents_available_budget_months` - бюджетные месяцы
+- `agents_available_payment_months` - месяцы оплат
+- `agents_available_value_kinds` - типы графиков
+
+Метрики:
+
+- `agents_deal_count`
+- `agents_area_sqm`
+- `agents_commission_base_amount`
+- `agents_commission_amount`
+- `agents_act_total_amount`
+- `agents_paid_amount`
+- `agents_remaining_amount`
+- `agents_ddu_assignment_amount`
+- `agents_ddu_amount`
+- `agents_assignment_amount`
+- `agents_furniture_amount`
+- `agents_monthly_value`
+
+Разрезы и фильтры:
+
+- `snapshot_month`
+- `budget_month`
+- `payment_period_month`
+- `value_kind`
+- `period_kind`

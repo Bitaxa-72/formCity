@@ -1,228 +1,4 @@
-import json
-
-import httpx
-from openai import AsyncOpenAI
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
-from app.core.config import Settings
-from app.llm.chat_options import build_chat_completion_options
-from app.pipeline.response_data import ResponseData
-
-
-ANSWER_SYSTEM_PROMPT = """
-Ты оформляешь проверенные данные backend в короткий русский ответ.
-Используй только числа, метрики, таблицы и source из входного JSON.
-Не добавляй новые цифры.
-Не делай новые расчеты.
-Не упоминай SQL, JSON, backend и внутренние этапы.
-Верни только валидный JSON.
-"""
-
-GENERAL_ANSWER_SYSTEM_PROMPT = """
-Ты отвечаешь пользователю коротко по-русски.
-Это общий вопрос или приветствие, не запрос к данным.
-Не рассчитывай данные.
-Не придумывай цифры.
-Не упоминай SQL, JSON, backend и внутренние этапы.
-Если пользователь здоровается, поздоровайся и кратко скажи, что можешь помочь с отчетами и данными проекта.
-Верни только валидный JSON.
-"""
-
-
-class LLMAnswerError(RuntimeError):
-    pass
-
-
-class AnswerDraft(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    text: str
-    used_metrics: list[str] = Field(default_factory=list)
-    source: dict[str, object] = Field(default_factory=dict)
-    warnings: list[str] = Field(default_factory=list)
-
-
-GENERAL_FALLBACK_TEXT = (
-    "Не понял запрос к данным.\n\n"
-    "Укажите, пожалуйста, тип отчета, проект, метрику и период.\n\n"
-    "Доступные отчеты:\n"
-    "- сводный отчет\n"
-    "- модель\n"
-    "- платежный календарь\n"
-    "- дорожная карта\n"
-    "- отчет о продажах\n"
-    "- отчет об исполнении плана продаж\n"
-    "- отчет по агентам\n"
-    "- остатки в продаже\n"
-    "- ДЗ и брони\n"
-    "- непроектные расходы"
-)
-CAPABILITIES_TEXT = (
-    "Я помогаю получать данные из подключенных отчетов.\n\n"
-    "Сейчас подключены:\n\n"
-    "Платежный календарь:\n"
-    "- проекты: Московский, Обводный;\n"
-    "- периоды: февраль 2026, март 2026, апрель 2026, май 2026;\n"
-    "- показатели: план, факт, отклонение;\n"
-    "- можно смотреть итоги, поступления, платежи, остатки и статьи расходов.\n\n"
-    "Дорожная карта:\n"
-    "- периоды: февраль 2026, март 2026, апрель 2026;\n"
-    "- можно смотреть этапы, сроки этапов, итоговый срок и внешние этапы.\n\n"
-    "Если проект не указан, покажу данные по всем проектам отдельно.\n"
-    "Если период не указан для платежного календаря, возьму весь доступный период.\n"
-    "Если период не указан для дорожной карты, возьму последний актуальный месяц."
-)
-ROADMAP_UNCLEAR_TEXT = (
-    "Не понял запрос по дорожной карте.\n\n"
-    "Укажите, что показать:\n"
-    "- этапы\n"
-    "- сроки этапов\n"
-    "- итоговый срок\n"
-    "- внешние этапы: банк или Росреестр\n"
-    "- доступные периоды"
-)
-
-METRIC_LABELS = {
-    "plan": "План",
-    "fact": "Факт",
-    "deviation": "Отклонение",
-    "value": "Значение",
-    "duration_min": "Минимальный срок",
-    "duration_max": "Максимальный срок",
-    "duration_range": "Диапазон срока",
-    "step_count": "Количество этапов",
-    "model_revenue": "\u0412\u044b\u0440\u0443\u0447\u043a\u0430",
-    "model_cost_of_sales": "\u0421\u0435\u0431\u0435\u0441\u0442\u043e\u0438\u043c\u043e\u0441\u0442\u044c \u043f\u0440\u043e\u0434\u0430\u0436",
-    "model_gross_profit": "\u0412\u0430\u043b\u043e\u0432\u0430\u044f \u043f\u0440\u0438\u0431\u044b\u043b\u044c",
-    "model_net_profit": "\u0427\u0438\u0441\u0442\u0430\u044f \u043f\u0440\u0438\u0431\u044b\u043b\u044c",
-    "model_npv": "NPV",
-    "model_roe": "ROE",
-    "model_llcr": "LLCR",
-    "model_total_area": "\u041e\u0431\u0449\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c",
-    "model_units_count": "\u041a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u0439",
-    "model_pir": "\u041f\u0418\u0420",
-    "amount": "Сумма",
-    "executed_amount": "Исполнено",
-    "remaining_amount": "Остаток / прогноз",
-}
-
-DIMENSION_LABELS = {
-    "project": "Проект",
-    "article": "Статья",
-    "article_kind": "Раздел",
-    "month": "Месяц",
-    "period": "Период",
-    "period_month": "Месяц",
-    "row_order": "Порядок",
-    "step": "Этап",
-    "snapshot_month": "\u0421\u0440\u0435\u0437\u044b \u043c\u043e\u0434\u0435\u043b\u0438",
-    "metric": "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u0435\u043b\u0438",
-    "parent_step": "Родительский этап",
-    "action": "Действие",
-    "external": "Внешний этап",
-    "total": "Итого",
-    "snapshot_month": "\u0421\u0440\u0435\u0437 \u043c\u043e\u0434\u0435\u043b\u0438",
-    "metric": "\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u0435\u043b\u044c",
-    "item_kind": "Тип",
-    "fm_category": "Категория",
-    "item_name": "Строка",
-    "row_type": "Вид строки",
-}
-
-DIMENSION_LIST_LABELS = {
-    "article": "Статьи",
-    "article_kind": "Разделы",
-    "project": "Проекты",
-    "period_month": "Периоды",
-    "period": "Периоды",
-    "month": "Месяцы",
-    "step": "Этапы",
-    "snapshot_month": "Срезы модели",
-    "metric": "Показатели",
-    "item_kind": "Типы",
-    "fm_category": "Категории",
-    "item_name": "Строки",
-    "row_type": "Виды строк",
-}
-
-PROJECT_LABELS = {
-    "obvodny": "Обводный",
-    "moskovsky": "Московский",
-    "evgenievsky": "Евгеньевский",
-    "all": "Все проекты",
-}
-
-REPORT_LABELS = {
-    "model": "\u041c\u043e\u0434\u0435\u043b\u044c",
-    "non_project_expenses": "Непроектные расходы",
-    "payment_calendar": "Платежный календарь",
-    "roadmap": "Дорожная карта",
-}
-
-ARTICLE_KIND_LABELS = {
-    "balance_start": "Остаток на начало",
-    "income_total": "Поступления",
-    "payment_total": "Итого платежи",
-    "balance_end": "Остаток на конец",
-    "detail": "Статья расходов",
-}
-
-NON_PROJECT_EXPENSES_ITEM_KIND_LABELS = {
-    "lost_income": "Недополученные доходы",
-    "debt_receivable": "ДЗ",
-    "non_project_expenses_total": "Итог непроектных расходов",
-    "personal": "Личное",
-    "admin_expenses": "АХР",
-    "evgenievsky": "ЕВГ",
-    "legal_entity": "Юрлица",
-    "fit_out": "Отделочные работы",
-    "commercial": "Коммерческие расходы",
-    "furniture": "Мебелировка",
-    "construction": "Строительные работы",
-    "developer_maintenance": "Содержание застройщика",
-    "object_maintenance": "Содержание объекта и техзаказчик",
-    "finance": "Финансовые расходы",
-    "pir": "ПИР",
-    "other_income_expense": "Прочие доходы и расходы",
-    "other": "Прочее",
-}
-
-ROW_TYPE_LABELS = {
-    "detail": "Детальная строка",
-    "summary": "Итоговая строка",
-}
-
-ARTICLE_KIND_ORDER = {
-    "balance_start": 0,
-    "income_total": 1,
-    "payment_total": 2,
-    "balance_end": 3,
-    "detail": 4,
-}
-
-MISSING_METRIC_TEXT = {
-    "plan": "план не заполнен",
-    "fact": "факт не заполнен",
-    "deviation": "отклонение не заполнено",
-    "value": "значение не заполнено",
-}
-
-MONTH_LABELS = {
-    "01": "январь",
-    "02": "февраль",
-    "03": "март",
-    "04": "апрель",
-    "05": "май",
-    "06": "июнь",
-    "07": "июль",
-    "08": "август",
-    "09": "сентябрь",
-    "10": "октябрь",
-    "11": "ноябрь",
-    "12": "декабрь",
-}
-
-
+from app.llm.answer_labels import *
 def format_number(value: object) -> str:
     if value is None:
         return "нет данных"
@@ -237,12 +13,18 @@ def format_number(value: object) -> str:
 def format_unit(unit: object) -> str:
     if unit in {"rub", "руб."}:
         return " руб."
+    if unit == "thousand_rub":
+        return " тыс. руб."
+    if unit == "thousand_rub_per_square_meter":
+        return " тыс. руб./м2"
     if unit == "work_day":
         return " раб. дн."
     if unit == "percent":
         return "%"
-    if unit == "square_meter":
+    if unit in {"square_meter", "sqm"}:
         return " м2"
+    if unit in {"rub_per_square_meter", "rub_per_sqm"}:
+        return " руб./м2"
     if unit == "count":
         return ""
     if unit == "ratio":
@@ -331,6 +113,10 @@ def build_answer_header(response_data: ResponseData) -> list[str]:
             elif isinstance(article_kind, list) and len(article_kind) == 1:
                 lines.append(f"Раздел: {format_dimension_value('article_kind', article_kind[0])}")
 
+    notices = source.get("notices")
+    if isinstance(notices, list):
+        lines.extend(str(notice) for notice in notices if isinstance(notice, str) and notice)
+
     return lines
 
 
@@ -348,7 +134,7 @@ def build_missing_value_answer(response_data: ResponseData, missing_metric: str)
             continue
         value = row.get(metric)
         raw_unit = units.get(metric) if isinstance(units, dict) else None
-        if raw_unit is None and source.get("report_type") in {"payment_calendar", "model", "non_project_expenses"}:
+        if raw_unit is None and source.get("report_type") in {"payment_calendar", "model", "non_project_expenses", "debt_and_bookings", "stock_for_sale", "sales_report"}:
             raw_unit = "rub"
         lines.append(format_metric_line(metric, value, raw_unit))
 
@@ -433,10 +219,103 @@ def build_roadmap_answer(response_data: ResponseData) -> AnswerDraft | None:
     )
 
 
+def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
+    if response_data.source.get("report_type") != "model":
+        return None
+    view = response_data.source.get("view")
+    if view not in {"model_raw_sheets", "model_raw_rows", "model_raw_search"}:
+        return None
+    if response_data.table is None or not response_data.table.rows:
+        return None
+
+    lines = build_answer_header(response_data)
+    lines.append("")
+
+    if view == "model_raw_sheets":
+        lines.append("Листы модели:")
+        for row in response_data.table.rows:
+            sheet = row.get("raw_sheet")
+            if sheet is None:
+                continue
+            row_count = row.get("row_count")
+            cell_count = row.get("cell_count")
+            details = []
+            if row_count is not None:
+                details.append(f"строк: {format_number(row_count)}")
+            if cell_count is not None:
+                details.append(f"ячеек: {format_number(cell_count)}")
+            suffix = f" ({', '.join(details)})" if details else ""
+            lines.append(f"- {sheet}{suffix}")
+    else:
+        filters = response_data.source.get("filters")
+        if isinstance(filters, dict):
+            raw_sheet = filters.get("raw_sheet")
+            raw_query = filters.get("raw_query")
+            if isinstance(raw_sheet, str) and raw_sheet:
+                lines.append(f"Лист: {format_dimension_value('raw_sheet', raw_sheet)}")
+            if isinstance(raw_query, str) and raw_query:
+                lines.append(f"Поиск: {raw_query}")
+            if raw_sheet or raw_query:
+                lines.append("")
+
+        for row in response_data.table.rows:
+            row_number = row.get("row_number")
+            row_label = row.get("row_label") or "без названия"
+            prefix = f"Строка {format_number(row_number)}" if row_number is not None else "Строка"
+            lines.append(f"{prefix}. {row_label}")
+            values_preview = row.get("values_preview")
+            if isinstance(values_preview, str) and values_preview.strip():
+                lines.append(f"Значения: {values_preview}")
+            lines.append("")
+
+        if lines and lines[-1] == "":
+            lines.pop()
+
+    if response_data.table.truncated:
+        lines.append("")
+        lines.append(f"Показаны первые {len(response_data.table.rows)} из {response_data.table.total_rows} строк.")
+
+    return AnswerDraft(
+        text="\n".join(lines),
+        used_metrics=[],
+        source=response_data.source,
+        warnings=response_data.warnings,
+    )
+
+
+def build_model_available_metrics_answer(response_data: ResponseData) -> AnswerDraft | None:
+    if response_data.source.get("report_type") != "model":
+        return None
+    if response_data.source.get("view") != "model_available_metrics":
+        return None
+
+    lines = build_answer_header(response_data)
+    lines.append("")
+    lines.append("Подключенные показатели модели:")
+    lines.extend(f"- {METRIC_LABELS.get(metric, metric)}" for metric in MODEL_SAFE_METRICS)
+    lines.append("")
+    lines.append("Также можно спросить доступные срезы модели, raw-листы модели или безопасные строки raw-листов.")
+
+    return AnswerDraft(
+        text="\n".join(lines),
+        used_metrics=[],
+        source=response_data.source,
+        warnings=response_data.warnings,
+    )
+
+
 def build_ready_answer(response_data: ResponseData) -> AnswerDraft:
     roadmap_answer = build_roadmap_answer(response_data)
     if roadmap_answer is not None:
         return roadmap_answer
+
+    model_available_metrics_answer = build_model_available_metrics_answer(response_data)
+    if model_available_metrics_answer is not None:
+        return model_available_metrics_answer
+
+    model_raw_answer = build_model_raw_answer(response_data)
+    if model_raw_answer is not None:
+        return model_raw_answer
 
     table_answer = build_table_answer(response_data)
     if table_answer is not None:
@@ -455,7 +334,7 @@ def build_ready_answer(response_data: ResponseData) -> AnswerDraft:
             if metric not in row:
                 continue
             raw_unit = units.get(metric) if isinstance(units, dict) else None
-            if raw_unit is None and response_data.source.get("report_type") in {"payment_calendar", "model", "non_project_expenses"}:
+            if raw_unit is None and response_data.source.get("report_type") in {"payment_calendar", "model", "non_project_expenses", "debt_and_bookings", "stock_for_sale", "sales_report"}:
                 raw_unit = "rub"
             value = row.get(metric)
             lines.append(format_metric_line(metric, value, raw_unit))
@@ -477,9 +356,38 @@ def format_dimension_value(key: str, value: object) -> str:
         return NON_PROJECT_EXPENSES_ITEM_KIND_LABELS.get(value, value)
     if key == "row_type" and isinstance(value, str):
         return ROW_TYPE_LABELS.get(value, value)
+    if key == "source_kind" and isinstance(value, str):
+        return SOURCE_KIND_LABELS.get(value, value)
+    if key == "property_type" and isinstance(value, str):
+        return STOCK_PROPERTY_TYPE_LABELS.get(value, value)
+    if key == "segment" and isinstance(value, str):
+        return SALES_SEGMENT_LABELS.get(value, value)
+    if key == "owner_scope" and isinstance(value, str):
+        return SALES_OWNER_LABELS.get(value, value)
+    if key == "scenario" and isinstance(value, str):
+        return SALES_SCENARIO_LABELS.get(value, value)
+    if key == "period_kind" and isinstance(value, str):
+        return SALES_PERIOD_KIND_LABELS.get(value, value)
+    if key == "value_kind" and isinstance(value, str):
+        return AGENTS_VALUE_KIND_LABELS.get(value, value)
+    if key == "sheet_kind" and isinstance(value, str):
+        return SUMMARY_SHEET_KIND_LABELS.get(value, value)
+    if key == "is_in_work":
+        return "да" if bool(value) else "нет"
     if key == "metric" and isinstance(value, str):
         return METRIC_LABELS.get(value, value)
-    if key in {"period", "period_month", "month"} and isinstance(value, str) and len(value) >= 7:
+    if key == "metric_key" and isinstance(value, str):
+        return {
+            "sales_revenue": "Продажи",
+            "cash_receipts": "Поступления денежных средств",
+            "contract_area_sqm": "Площадь контрактации",
+            "contract_count": "Количество сделок",
+            "price_per_sqm": "Цена за м2",
+        }.get(value, METRIC_LABELS.get(value, value))
+    if key == "raw_sheet" and isinstance(value, str):
+        normalized = " ".join(value.strip().lower().replace("ё", "е").split())
+        return RAW_SHEET_LABELS.get(normalized, value)
+    if key in {"period", "period_month", "month", "budget_month", "payment_period_month"} and isinstance(value, str) and len(value) >= 7:
         month = MONTH_LABELS.get(value[5:7])
         year = value[:4]
         if month and year.isdigit():
@@ -587,7 +495,7 @@ def build_table_answer(response_data: ResponseData) -> AnswerDraft | None:
             if metric not in row:
                 continue
             raw_unit = units.get(metric) if isinstance(units, dict) else None
-            if raw_unit is None and response_data.source.get("report_type") in {"payment_calendar", "model", "non_project_expenses"}:
+            if raw_unit is None and response_data.source.get("report_type") in {"payment_calendar", "model", "non_project_expenses", "debt_and_bookings", "stock_for_sale", "sales_report"}:
                 raw_unit = "rub"
             value = row.get(metric)
             lines.append(format_metric_line(metric, value, raw_unit))
@@ -679,7 +587,7 @@ class OpenAILLMAnswerer:
     async def build_answer(self, response_data: ResponseData | None) -> AnswerDraft:
         if response_data is None or not response_data.ready:
             return build_unready_answer(response_data)
-        if response_data.source.get("report_type") in {"payment_calendar", "roadmap", "model", "non_project_expenses"}:
+        if response_data.source.get("report_type") in {"payment_calendar", "roadmap", "model", "non_project_expenses", "debt_and_bookings", "stock_for_sale", "sales_report"}:
             return build_fallback_answer(response_data)
         table_answer = build_table_answer(response_data)
         if table_answer is not None:

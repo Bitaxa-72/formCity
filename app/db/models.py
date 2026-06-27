@@ -228,6 +228,65 @@ class ModelAssumptionFact(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class ModelRawSheet(Base):
+    __tablename__ = "model_raw_sheets"
+    __table_args__ = (UniqueConstraint("project", "snapshot_month", "source_file", "sheet_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project: Mapped[str] = mapped_column(String(64), index=True)
+    snapshot_month: Mapped[date] = mapped_column(Date, index=True)
+    source_file: Mapped[str] = mapped_column(String(255), index=True)
+    sheet_name: Mapped[str] = mapped_column(String(255), index=True)
+    sheet_kind: Mapped[str] = mapped_column(String(128), index=True)
+    max_row: Mapped[int] = mapped_column(Integer)
+    max_column: Mapped[int] = mapped_column(Integer)
+    row_count: Mapped[int] = mapped_column(Integer)
+    cell_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ModelRawRow(Base):
+    __tablename__ = "model_raw_rows"
+    __table_args__ = (UniqueConstraint("project", "snapshot_month", "source_file", "sheet_name", "row_number"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project: Mapped[str] = mapped_column(String(64), index=True)
+    snapshot_month: Mapped[date] = mapped_column(Date, index=True)
+    source_file: Mapped[str] = mapped_column(String(255), index=True)
+    sheet_name: Mapped[str] = mapped_column(String(255), index=True)
+    sheet_kind: Mapped[str] = mapped_column(String(128), index=True)
+    row_number: Mapped[int] = mapped_column(Integer, index=True)
+    row_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    non_empty_cells: Mapped[int] = mapped_column(Integer)
+    raw_values: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    is_sensitive: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    sensitive_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ModelRawCell(Base):
+    __tablename__ = "model_raw_cells"
+    __table_args__ = (UniqueConstraint("project", "snapshot_month", "source_file", "sheet_name", "row_number", "column_number"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project: Mapped[str] = mapped_column(String(64), index=True)
+    snapshot_month: Mapped[date] = mapped_column(Date, index=True)
+    source_file: Mapped[str] = mapped_column(String(255), index=True)
+    sheet_name: Mapped[str] = mapped_column(String(255), index=True)
+    sheet_kind: Mapped[str] = mapped_column(String(128), index=True)
+    row_number: Mapped[int] = mapped_column(Integer, index=True)
+    column_number: Mapped[int] = mapped_column(Integer, index=True)
+    column_letter: Mapped[str] = mapped_column(String(16))
+    value_type: Mapped[str] = mapped_column(String(32), index=True)
+    value_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_number: Mapped[Decimal | None] = mapped_column(Numeric(24, 6), nullable=True)
+    value_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    value_bool: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_sensitive: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    sensitive_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class NonProjectExpenseSource(Base):
     __tablename__ = "non_project_expense_sources"
     __table_args__ = (UniqueConstraint("project", "period_month", "file_hash"),)

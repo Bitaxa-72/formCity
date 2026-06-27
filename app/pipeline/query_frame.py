@@ -65,6 +65,7 @@ class QueryFrame(BaseModel):
     filters: dict[str, Any]
     group_by: list[str]
     operation: dict[str, Any] | None = None
+    notices: list[str] = Field(default_factory=list)
     ready: bool
     missing_fields: list[str]
     clarification_question: str | None = None
@@ -146,6 +147,7 @@ def build_query_frame(state: dict[str, Any]) -> QueryFrame:
         filters=prepared.get("filters") or {},
         group_by=prepared.get("group_by") or [],
         operation=operation,
+        notices=prepared.get("notices") or [],
         ready=ready,
         missing_fields=missing_fields,
         clarification_question=clarification_question,

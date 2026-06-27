@@ -12,6 +12,8 @@ SENSITIVE_COLUMNS = {
     "document",
     "document_number",
     "doc_number",
+    "fio",
+    "person",
     "contract_number",
     "agreement_number",
     "sensitive_kind",
@@ -21,6 +23,8 @@ INTERNAL_COLUMNS = {"source_rows", "source_file", "source_sheet", "source_row", 
 PHONE_RE = re.compile(r"(?<!\d)\+?\d(?:[\s().-]*\d){9,15}(?!\d)")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 DOCUMENT_NUMBER_RE = re.compile(r"(?i)(№\s*)[A-Za-zА-Яа-я0-9/_-]{2,}")
+FIO_INITIALS_RE = re.compile(r"\b[А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ]\.){1,2}")
+FIO_FULL_RE = re.compile(r"\b[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\b")
 
 
 def is_sensitive_column(column: str) -> bool:
@@ -32,15 +36,35 @@ def is_hidden_column(column: str) -> bool:
     return column in INTERNAL_COLUMNS or is_sensitive_column(column)
 
 
+def phone_match_is_financial_number(match: re.Match[str]) -> bool:
+    value = match.group(0)
+    start, end = match.span()
+    previous_char = match.string[start - 1 : start] if start > 0 else ""
+    next_char = match.string[end : end + 1]
+    return "." in value or "," in value or previous_char in {".", ","} or next_char in {".", ","}
+
+
+def replace_phone_match(match: re.Match[str]) -> str:
+    if phone_match_is_financial_number(match):
+        return match.group(0)
+    return "[contact hidden]"
+
+
+def text_has_phone(value: str) -> bool:
+    return any(not phone_match_is_financial_number(match) for match in PHONE_RE.finditer(value))
+
+
 def sanitize_text(value: str) -> str:
+    value = FIO_FULL_RE.sub("[person hidden]", value)
+    value = FIO_INITIALS_RE.sub("[person hidden]", value)
     value = EMAIL_RE.sub("[contact hidden]", value)
-    value = PHONE_RE.sub("[contact hidden]", value)
+    value = PHONE_RE.sub(replace_phone_match, value)
     return DOCUMENT_NUMBER_RE.sub(r"\1[document hidden]", value)
 
 
 def detect_sensitive_kind(value: str) -> str | None:
     normalized = value.lower()
-    if EMAIL_RE.search(value) or PHONE_RE.search(value):
+    if EMAIL_RE.search(value) or text_has_phone(value):
         return "contact"
     if DOCUMENT_NUMBER_RE.search(value):
         return "document_number"
@@ -48,6 +72,8 @@ def detect_sensitive_kind(value: str) -> str | None:
         return "document_number"
     if any(marker in normalized for marker in ("телефон", "email", "e-mail", "почта", "контакт")):
         return "contact"
+    if FIO_FULL_RE.search(value) or FIO_INITIALS_RE.search(value):
+        return "person"
     return None
 
 

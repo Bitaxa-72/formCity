@@ -73,3 +73,43 @@
 Колонка `Итого` хранится как `period_kind=total`, а помесячные колонки как `period_kind=month`.
 
 При будущей логике бота нельзя смешивать `total` и `month` без явного намерения пользователя.
+
+## Подключенный маппинг запросов
+
+Отчет подключен к ответам бота через `report_type=sales_report`.
+
+Публичные метрики:
+
+- `sales_contract_revenue` - выручка по контрактации
+- `sales_contract_area_sqm` - объем контрактации, м2
+- `sales_contract_count` - количество сделок / помещений
+- `sales_price_per_sqm` - цена за м2
+- `sales_ddu_actual_payments` - фактические оплаты по ДДУ
+- `sales_ddu_remaining_payment_schedule` - график оплаты остатка по ДДУ
+- `sales_cumulative_price_per_sqm` - накопительная цена за м2
+
+Подключенные view:
+
+- `sales_summary` - сводка по `project_total`
+- `sales_by_segments` - разбивка по сегментам
+- `sales_monthly` - помесячные значения продаж
+- `sales_payments` - оплаты ДДУ и остаток оплат
+- `sales_price_per_sqm` - цены за м2 по сегментам
+- `sales_apartments` - апартаменты
+- `sales_commercial_1_floor` - коммерция 1 этаж
+- `sales_restaurant` - ресторан
+- `sales_storage` - кладовки
+- `sales_commercial_2_floor` - коммерция 2 этаж
+- `sales_sh` - SH
+- `sales_available_snapshots` - доступные срезы отчета
+- `sales_available_periods` - доступные месяцы продаж
+- `sales_available_segments` - доступные сегменты
+- `sales_available_metrics` - доступные показатели
+- `sales_available_owners` - доступные владельцы
+- `sales_available_scenarios` - доступные сценарии
+
+Если срез отчета не указан, backend берет последний актуальный срез.
+
+Обычные фразы `за май`, `за март` для отчета продаж трактуются как месяц продаж внутри матрицы. Для выбора версии отчета нужно явно сказать `срез`, например `срез апрель`.
+
+По умолчанию сводка использует `segment=project_total`, `period_kind=total`, `scenario=total`, `owner_scope=all`, чтобы не смешивать итоговые строки и сегменты.

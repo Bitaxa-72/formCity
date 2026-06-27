@@ -1,10 +1,8 @@
 import asyncio
 import logging
 import json
-from contextlib import suppress
 from collections.abc import Generator
 from time import perf_counter
-from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Request
@@ -12,14 +10,10 @@ from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from app.core.access import UNAUTHORIZED_ACCESS_MESSAGE, is_username_allowed, normalize_username
+from app.core.access import UNAUTHORIZED_ACCESS_MESSAGE, is_username_allowed
 from app.pipeline.calculation_engine import CalculationEngine, CalculationError
 from app.bot.commands import (
-    ADMIN_DISABLED_MESSAGE,
-    ADMIN_ENABLED_MESSAGE,
-    ADMIN_ONLY_MESSAGE,
     BOT_COMMANDS,
-    COMMAND_RESPONSES,
     normalize_command,
 )
 from app.core.config import Settings, load_settings
@@ -29,16 +23,12 @@ from app.health import HealthChecker
 from app.llm.answer import (
     LLMAnswerError,
     OpenAILLMAnswerer,
-    build_capabilities_answer,
     build_fallback_answer,
-    build_general_fallback_answer,
-    build_roadmap_unclear_answer,
 )
 from app.llm.dictionary import Intent
 from app.llm.input import build_llm_input
-from app.llm.parser import LLMParsedResponse, LLMParserError, OpenAILLMParser, StateDelta
-from app.pipeline.domain_resolver import DomainResolver, format_period_phrase, format_project_phrase, normalize_search_text, select_article_from_options
-from app.pipeline.dimension_clarification import resolve_dimension_clarification
+from app.llm.parser import LLMParserError, OpenAILLMParser
+from app.pipeline.domain_resolver import DomainResolver, normalize_search_text
 from app.pipeline.failed_query import (
     CONTEXT_BLOCKED_AFTER_ERROR,
     CONTEXT_BLOCKED_MESSAGE,
@@ -47,11 +37,10 @@ from app.pipeline.failed_query import (
     block_short_followup_after_error,
 )
 from app.pipeline.logging_context import build_request_log_context, dump_log_context
-from app.pipeline.math_shortcuts import resolve_math_shortcut
-from app.pipeline.metric_catalog import METRIC_CATALOG
+from app.pipeline.math_shortcuts import resolve_math_shortcut, resolve_pending_math_shortcut
 from app.pipeline.metric_resolver import REPORT_NOT_CONNECTED_MESSAGE, resolve_metrics
 from app.pipeline.pdf_report import PDF_REPORT_NOTICE, build_pdf_report, should_send_pdf_report
-from app.pipeline.query_frame import NON_DATA_QUERY_MESSAGE, QueryPeriod, build_query_frame
+from app.pipeline.query_frame import NON_DATA_QUERY_MESSAGE, build_query_frame
 from app.pipeline.report_compatibility import check_report_compatibility
 from app.pipeline.report_semantics import apply_report_semantics
 from app.db.repositories import UserSessionRepository
@@ -59,10 +48,24 @@ from app.pipeline.result_verifier import verify_result
 from app.pipeline.response_data import build_response_data
 from app.pipeline.sql_compiler import SQLCompileError, compile_sql
 from app.bot.telegram_client import CHAT_ACTION_TYPING, CHAT_ACTION_UPLOAD_DOCUMENT, TelegramClient
-from app.bot.telegram_response import TelegramResponseStatus, send_answer_to_telegram, split_telegram_text
+from app.bot.sending import keep_chat_action, safe_send_chat_action, safe_send_message, stop_background_task
+from app.bot.telegram_response import TelegramResponseStatus, send_answer_to_telegram
 from app.bot.telegram_schemas import TelegramUpdate
-from app.reports.payment_calendar.corrections import build_failed_group_by_correction, build_failed_metric_correction
-from app.reports.roadmap.corrections import build_failed_roadmap_correction
+from app.reports.model.catalog import MODEL_RAW_VIEWS
+from app.pipeline.admin_debug import is_admin_debug_enabled, send_admin_debug
+from app.pipeline.command_flow import handle_bot_command
+from app.pipeline.forced_corrections import build_forced_parsed_response
+from app.pipeline.llm_postprocess import apply_article_clarification_selection, apply_dimension_clarification_selection, apply_dimension_query_fallback
+from app.pipeline.non_data_flow import handle_general_question, handle_unsupported_query
+from app.pipeline.pending_actions import (
+    PENDING_CANCEL_MESSAGE,
+    PENDING_SHOW_AVAILABLE_ARTICLES,
+    PENDING_UNCLEAR_MESSAGE,
+)
+from app.pipeline.pending_flow import handle_pending_action
+from app.pipeline.session_state import clear_state_preserving_admin_debug, preserve_admin_debug_flag, user_session_with_state
+from app.pipeline.text_intents import is_report_type_not_connected, should_skip_pdf_report
+from app.pipeline.timing import record_timing
 
 
 logging.basicConfig(
@@ -77,346 +80,6 @@ logger = logging.getLogger("formcity.webhook")
 app = FastAPI(title="formCityBot")
 LLM_PARSE_ERROR_MESSAGE = NON_DATA_QUERY_MESSAGE
 ADMIN_DEBUG_TASKS: set[asyncio.Task[None]] = set()
-PENDING_SHOW_AVAILABLE_ARTICLES = "show_available_articles"
-PENDING_CONFIRMATIONS = {
-    "да",
-    "давай",
-    "lf",
-    "lfdfq",
-    "покажи",
-    "показать",
-    "список",
-    "покажи список",
-    "покажи статьи",
-    "доступные статьи",
-    "какие есть",
-    "что есть",
-    "можно",
-    "ок",
-    "окей",
-    "ага",
-    "да покажи",
-    "давай список",
-}
-PENDING_CANCELLATIONS = {
-    "нет",
-    "не надо",
-    "не нужно",
-    "отмена",
-    "отмени",
-    "забей",
-    "не показывай",
-}
-PENDING_CANCEL_MESSAGE = "Ок, не показываю список."
-PENDING_UNCLEAR_MESSAGE = 'Не понял ответ. Напишите "да", чтобы показать доступные статьи, или задайте новый запрос полностью.'
-
-
-def user_session_with_state(user_session: object, state: dict[str, object]) -> object:
-    return SimpleNamespace(
-        user=user_session.user,
-        state=state,
-        history=user_session.history,
-        last_result=user_session.last_result,
-    )
-
-
-async def safe_send_message(
-    telegram_client: TelegramClient,
-    chat_id: int,
-    text: str,
-    request_id: str,
-) -> bool:
-    try:
-        await telegram_client.send_message(chat_id, text)
-        return True
-    except Exception:
-        logger.exception(
-            "send_message_failed request_id=%s chat_id=%s",
-            request_id,
-            chat_id,
-        )
-        return False
-
-
-async def safe_send_chat_action(
-    telegram_client: TelegramClient,
-    chat_id: int,
-    action: str,
-    request_id: str,
-) -> bool:
-    try:
-        await telegram_client.send_chat_action(chat_id, action)
-        return True
-    except Exception:
-        logger.warning(
-            "send_chat_action_failed request_id=%s chat_id=%s action=%s",
-            request_id,
-            chat_id,
-            action,
-        )
-        return False
-
-
-async def keep_chat_action(
-    telegram_client: TelegramClient,
-    chat_id: int,
-    action: str,
-    request_id: str,
-    interval_seconds: int = 4,
-) -> None:
-    while True:
-        await asyncio.sleep(interval_seconds)
-        await safe_send_chat_action(telegram_client, chat_id, action, request_id)
-
-
-async def stop_background_task(task: asyncio.Task[None] | None) -> None:
-    if task is None:
-        return
-
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
-
-
-def record_timing(timings: dict[str, int], stage: str, started_at: float) -> None:
-    timings[f"{stage}_ms"] = int((perf_counter() - started_at) * 1000)
-
-
-def is_admin_debug_enabled(username: str | None, settings: Settings, state: dict[str, object] | None) -> bool:
-    normalized_username = normalize_username(username)
-    return bool(
-        normalized_username
-        and normalized_username in settings.admin_usernames
-        and state
-        and state.get("admin_debug_enabled") is True
-    )
-
-
-def preserve_admin_debug_flag(source_state: dict[str, object] | None, target_state: dict[str, object]) -> dict[str, object]:
-    state_to_save = dict(target_state)
-    if source_state and source_state.get("admin_debug_enabled") is True:
-        state_to_save["admin_debug_enabled"] = True
-    return state_to_save
-
-
-def clear_state_preserving_admin_debug(
-    user_session_repository: UserSessionRepository,
-    user_id: int,
-    source_state: dict[str, object] | None,
-) -> None:
-    user_session_repository.clear_state(user_id)
-    if source_state and source_state.get("admin_debug_enabled") is True:
-        user_session_repository.save_dialog_state(user_id, {"admin_debug_enabled": True})
-
-
-def clear_pending_action(state: dict[str, object] | None) -> dict[str, object]:
-    updated = dict(state or {})
-    updated.pop("pending_action", None)
-    updated.pop("pending_payload", None)
-    return updated
-
-
-def classify_pending_response(text: str | None) -> str:
-    normalized = normalize_search_text(text or "")
-    if normalized in PENDING_CANCELLATIONS:
-        return "cancel"
-    if len(normalized.split()) <= 4 and normalized in PENDING_CONFIRMATIONS:
-        return "confirm"
-    if normalized and len(normalized) <= 2 and normalized != "it":
-        return "unclear"
-    return "new_query"
-
-
-def is_capabilities_question(text: str | None) -> bool:
-    normalized = normalize_search_text(text or "")
-    if not normalized:
-        return False
-
-    direct_phrases = {
-        "что ты умеешь",
-        "что умеешь",
-        "что можешь",
-        "что ты можешь",
-        "как пользоваться",
-        "как с тобой работать",
-        "какие возможности",
-        "что доступно",
-        "что можно спросить",
-        "помощь",
-        "help",
-    }
-    if normalized in direct_phrases:
-        return True
-
-    has_capability_word = any(marker in normalized for marker in {"умееш", "можеш", "возможност"})
-    has_question_word = any(marker in normalized for marker in {"что", "чем", "как", "какие"})
-    return has_capability_word and has_question_word
-
-
-def is_vague_followup_question(text: str | None) -> bool:
-    normalized = normalize_search_text(text or "")
-    return normalized in {
-        "а что там",
-        "что там",
-        "покажи это",
-        "покажи",
-        "ну и",
-        "и что",
-        "что дальше",
-        "что по этому",
-        "что по нему",
-    }
-
-
-def is_unclear_roadmap_question(text: str | None) -> bool:
-    normalized = normalize_search_text(text or "")
-    return "дорожная карта" in normalized
-
-
-def is_report_type_not_connected(report_type: str | None) -> bool:
-    return bool(report_type and report_type in METRIC_CATALOG and not METRIC_CATALOG[report_type])
-
-
-def build_available_articles_message(articles: list[str], payload: dict[str, object]) -> str:
-    period = QueryPeriod.model_validate(payload.get("period") or {})
-    title = (
-        "Доступные статьи в платежном календаре "
-        f"по {format_project_phrase(payload.get('project') if isinstance(payload.get('project'), str) else None)} "
-        f"за {format_period_phrase(period)}:"
-    )
-    if not articles:
-        return title + "\n\nНе нашел статей за этот период."
-    return title + "\n\n" + "\n".join(f"- {article}" for article in articles)
-
-
-def apply_article_clarification_selection(
-    state: dict[str, object] | None,
-    parsed_response: LLMParsedResponse,
-    user_text: str | None,
-) -> LLMParsedResponse:
-    if not state or state.get("awaiting_clarification") is not True or state.get("clarification_kind") != "article":
-        return parsed_response
-
-    options = state.get("clarification_options")
-    if not isinstance(options, list) or not all(isinstance(option, str) for option in options):
-        return parsed_response
-
-    selected_article = select_article_from_options(user_text or "", options)
-    if not selected_article:
-        return parsed_response
-
-    delta_data = parsed_response.state_delta.model_dump(mode="json", by_alias=True, exclude_none=True)
-    filters = dict(delta_data.get("filters") or {})
-    filters["article"] = selected_article
-    delta_data["filters"] = filters
-    return parsed_response.model_copy(
-        update={
-            "state_delta": StateDelta.model_validate(delta_data),
-            "needs_clarification": False,
-            "clarification_question": None,
-        },
-    )
-
-
-def apply_dimension_clarification_selection(
-    state: dict[str, object] | None,
-    parsed_response: LLMParsedResponse,
-    user_text: str | None,
-) -> LLMParsedResponse:
-    if not state or state.get("awaiting_clarification") is not True or state.get("clarification_kind") != "dimension":
-        return parsed_response
-
-    resolution = resolve_dimension_clarification(user_text)
-    if not resolution.matched or not resolution.dimension:
-        return parsed_response
-
-    delta_data = parsed_response.state_delta.model_dump(mode="json", by_alias=True, exclude_none=True)
-    delta_data["dimension"] = resolution.dimension
-    delta_data.pop("metrics", None)
-    if resolution.filters:
-        filters = dict(delta_data.get("filters") or {})
-        filters.update(resolution.filters)
-        delta_data["filters"] = filters
-    else:
-        delta_data.pop("filters", None)
-
-    return parsed_response.model_copy(
-        update={
-            "intent": Intent.DIMENSION_QUERY,
-            "state_delta": StateDelta.model_validate(delta_data),
-            "needs_clarification": False,
-            "clarification_question": None,
-        },
-    )
-
-
-def apply_dimension_query_fallback(parsed_response: LLMParsedResponse, user_text: str | None) -> LLMParsedResponse:
-    normalized = normalize_search_text(user_text or "")
-    if "платежн" not in normalized and "календар" not in normalized:
-        return parsed_response
-    if not any(marker in normalized for marker in {"какие", "какой", "список", "перечень"}):
-        return parsed_response
-
-    resolution = resolve_dimension_clarification(user_text)
-    if not resolution.matched or not resolution.dimension:
-        return parsed_response
-
-    delta_data = parsed_response.state_delta.model_dump(mode="json", by_alias=True, exclude_none=True)
-    delta_data["report_type"] = "payment_calendar"
-    delta_data["dimension"] = resolution.dimension
-    delta_data.pop("metrics", None)
-    if resolution.filters:
-        existing_filters = dict(delta_data.get("filters") or {})
-        existing_filters.update(resolution.filters)
-        delta_data["filters"] = existing_filters
-    else:
-        delta_data.pop("filters", None)
-
-    return parsed_response.model_copy(
-        update={
-            "intent": Intent.DIMENSION_QUERY,
-            "state_delta": StateDelta.model_validate(delta_data),
-            "needs_clarification": False,
-            "clarification_question": None,
-        },
-    )
-
-
-async def send_admin_debug_now(
-    telegram_client: TelegramClient,
-    chat_id: int,
-    request_id: str,
-    enabled: bool,
-    stage: str,
-    payload: object,
-) -> None:
-    if not enabled:
-        return
-
-    body = json.dumps(jsonable_encoder(payload), ensure_ascii=False, indent=2)
-    text = f"ADMIN DEBUG: {stage}\nrequest_id: {request_id}\n\n```json\n{body}\n```"
-    for chunk in split_telegram_text(text):
-        await safe_send_message(telegram_client, chat_id, chunk, request_id)
-
-
-async def send_admin_debug(
-    telegram_client: TelegramClient,
-    chat_id: int,
-    request_id: str,
-    enabled: bool,
-    stage: str,
-    payload: object,
-) -> None:
-    if not enabled:
-        return
-
-    task = asyncio.create_task(
-        send_admin_debug_now(telegram_client, chat_id, request_id, enabled, stage, payload),
-    )
-    ADMIN_DEBUG_TASKS.add(task)
-    task.add_done_callback(ADMIN_DEBUG_TASKS.discard)
-
-
 def get_settings() -> Settings:
     return load_settings()
 
@@ -567,139 +230,36 @@ async def telegram_webhook(
     )
 
     command = normalize_command(message.text)
-    if command:
-        if command == "/admin":
-            normalized_username = normalize_username(username)
-            if not normalized_username or normalized_username not in settings.admin_usernames:
-                await safe_send_message(
-                    telegram_client,
-                    message.chat.id,
-                    ADMIN_ONLY_MESSAGE,
-                    request_id,
-                )
-                return {
-                    "ok": True,
-                    "request_id": request_id,
-                    "access": "allowed",
-                    "command": command,
-                    "admin": "denied",
-                    "session": "loaded",
-                }
+    command_response = await handle_bot_command(
+        command,
+        username=username,
+        chat_id=message.chat.id,
+        update_id=update.update_id,
+        request_id=request_id,
+        user_id=user_session.user.id,
+        current_state=current_state,
+        settings=settings,
+        telegram_client=telegram_client,
+        user_session_repository=user_session_repository,
+    )
+    if command_response is not None:
+        return command_response
 
-            state_to_save = dict(current_state)
-            admin_debug_enabled = not bool(state_to_save.get("admin_debug_enabled"))
-            state_to_save["admin_debug_enabled"] = admin_debug_enabled
-            user_session_repository.save_dialog_state(
-                user_session.user.id,
-                jsonable_encoder(state_to_save),
-            )
-            await safe_send_message(
-                telegram_client,
-                message.chat.id,
-                ADMIN_ENABLED_MESSAGE if admin_debug_enabled else ADMIN_DISABLED_MESSAGE,
-                request_id,
-            )
-            return {
-                "ok": True,
-                "request_id": request_id,
-                "access": "allowed",
-                "command": command,
-                "admin_debug_enabled": admin_debug_enabled,
-                "session": "loaded",
-            }
+    pending_response, current_state = await handle_pending_action(
+        current_state,
+        text=message.text,
+        chat_id=message.chat.id,
+        user_id=user_session.user.id,
+        request_id=request_id,
+        telegram_client=telegram_client,
+        user_session_repository=user_session_repository,
+        domain_resolver=domain_resolver,
+    )
+    if pending_response is not None:
+        return pending_response
 
-        if command in {"/clear", "/start"}:
-            clear_state_preserving_admin_debug(
-                user_session_repository,
-                user_session.user.id,
-                current_state,
-            )
-
-        await safe_send_message(
-            telegram_client,
-            message.chat.id,
-            COMMAND_RESPONSES[command],
-            request_id,
-        )
-        logger.info(
-            "command_handled request_id=%s update_id=%s chat_id=%s username=%s command=%s",
-            request_id,
-            update.update_id,
-            message.chat.id,
-            username,
-            command,
-        )
-        return {
-            "ok": True,
-            "request_id": request_id,
-            "access": "allowed",
-            "command": command,
-            "session": "loaded",
-        }
-
-    if current_state.get("pending_action") == PENDING_SHOW_AVAILABLE_ARTICLES:
-        pending_payload = current_state.get("pending_payload")
-        pending_action = classify_pending_response(message.text)
-
-        if pending_action == "unclear":
-            await safe_send_message(telegram_client, message.chat.id, PENDING_UNCLEAR_MESSAGE, request_id)
-            return {
-                "ok": True,
-                "request_id": request_id,
-                "access": "allowed",
-                "session": "loaded",
-                "pending_action": "unclear",
-                "telegram_response_sent": True,
-            }
-
-        state_to_save = clear_pending_action(current_state)
-        user_session_repository.save_dialog_state(
-            user_session.user.id,
-            jsonable_encoder(state_to_save),
-        )
-
-        if pending_action == "confirm" and isinstance(pending_payload, dict):
-            articles = domain_resolver.load_payment_calendar_articles_for_period(
-                pending_payload.get("project") if isinstance(pending_payload.get("project"), str) else None,
-                pending_payload.get("period") if isinstance(pending_payload.get("period"), dict) else {},
-            )
-            response_text = build_available_articles_message(articles, pending_payload)
-            for chunk in split_telegram_text(response_text):
-                await safe_send_message(telegram_client, message.chat.id, chunk, request_id)
-            return {
-                "ok": True,
-                "request_id": request_id,
-                "access": "allowed",
-                "session": "loaded",
-                "pending_action": "handled",
-                "available_articles": len(articles),
-                "telegram_response_sent": True,
-            }
-
-        if pending_action == "cancel":
-            await safe_send_message(telegram_client, message.chat.id, PENDING_CANCEL_MESSAGE, request_id)
-            return {
-                "ok": True,
-                "request_id": request_id,
-                "access": "allowed",
-                "session": "loaded",
-                "pending_action": "cancelled",
-                "telegram_response_sent": True,
-            }
-
-        current_state = state_to_save
-
-    forced_parsed_response: LLMParsedResponse | None = None
-    failed_group_by_correction = build_failed_group_by_correction(current_state, message.text)
-    failed_metric_correction = build_failed_metric_correction(current_state, message.text)
-    failed_roadmap_correction = build_failed_roadmap_correction(current_state, message.text)
-    if failed_group_by_correction is not None:
-        current_state, forced_parsed_response = failed_group_by_correction
-    elif failed_metric_correction is not None:
-        current_state, forced_parsed_response = failed_metric_correction
-    elif failed_roadmap_correction is not None:
-        current_state, forced_parsed_response = failed_roadmap_correction
-    elif block_short_followup_after_error(current_state, message.text):
+    current_state, forced_parsed_response = build_forced_parsed_response(current_state, message.text)
+    if forced_parsed_response is None and block_short_followup_after_error(current_state, message.text):
         state_to_save = preserve_admin_debug_flag(current_state, dict(current_state))
         state_to_save["last_trace"] = jsonable_encoder(
             {
@@ -741,7 +301,15 @@ async def telegram_webhook(
         keep_chat_action(telegram_client, message.chat.id, CHAT_ACTION_TYPING, request_id),
     )
 
-    math_shortcut = resolve_math_shortcut(message.text, user_session.last_result) if forced_parsed_response is None else None
+    pending_math_operation = current_state.get("pending_math_shortcut")
+    math_shortcut = None
+    math_shortcut_from_pending = False
+    if forced_parsed_response is None:
+        if isinstance(pending_math_operation, dict):
+            math_shortcut = resolve_pending_math_shortcut(message.text, user_session.last_result, pending_math_operation)
+            math_shortcut_from_pending = math_shortcut.handled
+        if math_shortcut is None or not math_shortcut.handled:
+            math_shortcut = resolve_math_shortcut(message.text, user_session.last_result)
     if math_shortcut and math_shortcut.handled:
         await send_admin_debug(
             telegram_client,
@@ -752,6 +320,10 @@ async def telegram_webhook(
             math_shortcut,
         )
         state_to_save = preserve_admin_debug_flag(current_state, current_state)
+        if math_shortcut_from_pending or math_shortcut.result is not None:
+            state_to_save.pop("pending_math_shortcut", None)
+        elif math_shortcut.pending_operation is not None:
+            state_to_save["pending_math_shortcut"] = math_shortcut.pending_operation
         state_to_save["last_trace"] = jsonable_encoder(
             {
                 "request_id": request_id,
@@ -899,147 +471,42 @@ async def telegram_webhook(
     )
 
     if parsed_response.intent == Intent.GENERAL_QUESTION:
-        answer_error = None
-        stage_started_at = perf_counter()
-        if is_capabilities_question(message.text):
-            answer_draft = build_capabilities_answer()
-            record_timing(timings, "llm_answer", stage_started_at)
-        elif is_unclear_roadmap_question(message.text):
-            answer_draft = build_roadmap_unclear_answer()
-            record_timing(timings, "llm_answer", stage_started_at)
-        elif is_vague_followup_question(message.text):
-            answer_draft = build_general_fallback_answer()
-            record_timing(timings, "llm_answer", stage_started_at)
-        else:
-            try:
-                answer_draft = await llm_answerer.build_general_answer(message.text)
-            except LLMAnswerError as error:
-                record_timing(timings, "llm_answer", stage_started_at)
-                answer_error = str(error)
-                answer_draft = build_general_fallback_answer()
-                logger.warning(
-                    "llm_general_answer_failed request_id=%s update_id=%s chat_id=%s username=%s error=%s",
-                    request_id,
-                    update.update_id,
-                    message.chat.id,
-                    username,
-                    answer_error,
-                )
-            else:
-                record_timing(timings, "llm_answer", stage_started_at)
-        await send_admin_debug(
-            telegram_client,
-            message.chat.id,
-            request_id,
-            admin_debug_enabled,
-            "03 GeneralAnswerDraft",
-            answer_draft,
+        return await handle_general_question(
+            parsed_response,
+            text=message.text,
+            chat_id=message.chat.id,
+            update_id=update.update_id,
+            message_id=message.message_id,
+            username=username,
+            request_id=request_id,
+            user_id=user_session.user.id,
+            current_state=current_state,
+            timings=timings,
+            request_started_at=request_started_at,
+            typing_task=typing_task,
+            admin_debug_enabled=admin_debug_enabled,
+            telegram_client=telegram_client,
+            user_session_repository=user_session_repository,
+            llm_answerer=llm_answerer,
         )
-        await stop_background_task(typing_task)
-        stage_started_at = perf_counter()
-        telegram_response_status = await send_answer_to_telegram(
-            telegram_client,
-            message.chat.id,
-            answer_draft,
-        )
-        record_timing(timings, "telegram_send", stage_started_at)
-        await send_admin_debug(
-            telegram_client,
-            message.chat.id,
-            request_id,
-            admin_debug_enabled,
-            "04 TelegramResponseStatus",
-            telegram_response_status,
-        )
-
-        trace = {
-            "request_id": request_id,
-            "intent": parsed_response.intent,
-            "general_answer_done": True,
-            "telegram_response_sent": telegram_response_status.sent,
-            "timings": timings,
-        }
-        state_to_save = preserve_admin_debug_flag(current_state, dict(current_state))
-        state_to_save["last_trace"] = jsonable_encoder(trace)
-        user_session_repository.save_dialog_state(user_session.user.id, jsonable_encoder(state_to_save))
-
-        assistant_message_saved = False
-        if telegram_response_status.sent:
-            user_session_repository.add_assistant_message(
-                user_session.user.id,
-                request_id,
-                update.update_id,
-                answer_draft.text,
-            )
-            assistant_message_saved = True
-
-        record_timing(timings, "total", request_started_at)
-        return {
-            "ok": True,
-            "request_id": request_id,
-            "update_id": update.update_id,
-            "message_id": message.message_id,
-            "username": username,
-            "access": "allowed",
-            "session": "loaded",
-            "llm_input": "built",
-            "llm_parse": "done",
-            "intent": parsed_response.intent,
-            "llm_answer": "done",
-            "telegram_response_sent": telegram_response_status.sent,
-            "telegram_response_chunks": telegram_response_status.chunks,
-            "telegram_response_error": telegram_response_status.error,
-            "state_saved": True,
-            "assistant_message_saved": assistant_message_saved,
-            "timings": timings,
-        }
 
     if parsed_response.intent == Intent.UNSUPPORTED:
-        await stop_background_task(typing_task)
-        stage_started_at = perf_counter()
-        telegram_response_sent = await safe_send_message(
-            telegram_client,
-            message.chat.id,
-            NON_DATA_QUERY_MESSAGE,
-            request_id,
+        return await handle_unsupported_query(
+            parsed_response,
+            chat_id=message.chat.id,
+            update_id=update.update_id,
+            message_id=message.message_id,
+            username=username,
+            request_id=request_id,
+            user_id=user_session.user.id,
+            current_state=current_state,
+            timings=timings,
+            request_started_at=request_started_at,
+            typing_task=typing_task,
+            admin_debug_enabled=admin_debug_enabled,
+            telegram_client=telegram_client,
+            user_session_repository=user_session_repository,
         )
-        record_timing(timings, "telegram_send", stage_started_at)
-        record_timing(timings, "total", request_started_at)
-
-        state_to_save = preserve_admin_debug_flag(current_state, dict(current_state))
-        state_to_save["last_trace"] = jsonable_encoder(
-            {
-                "request_id": request_id,
-                "intent": parsed_response.intent,
-                "non_data_query": True,
-                "telegram_response_sent": telegram_response_sent,
-                "timings": timings,
-            },
-        )
-        user_session_repository.save_dialog_state(user_session.user.id, jsonable_encoder(state_to_save))
-        await send_admin_debug(
-            telegram_client,
-            message.chat.id,
-            request_id,
-            admin_debug_enabled,
-            "03 UnsupportedResponse",
-            {"text": NON_DATA_QUERY_MESSAGE, "sent": telegram_response_sent},
-        )
-        return {
-            "ok": True,
-            "request_id": request_id,
-            "update_id": update.update_id,
-            "message_id": message.message_id,
-            "username": username,
-            "access": "allowed",
-            "session": "loaded",
-            "llm_input": "built",
-            "llm_parse": "done",
-            "intent": parsed_response.intent,
-            "telegram_response_sent": telegram_response_sent,
-            "state_saved": True,
-            "timings": timings,
-        }
 
     stage_started_at = perf_counter()
     resolved_state = resolve_context(current_state, parsed_response)
@@ -1430,6 +897,7 @@ async def telegram_webhook(
     sql_error = None
     should_compile_sql = query_frame.ready and metric_resolution.valid and (
         bool(metric_resolution.metrics) or query_frame.intent == "dimension_query"
+        or (query_frame.report_type == "model" and query_frame.view in MODEL_RAW_VIEWS)
     )
     if should_compile_sql:
         stage_started_at = perf_counter()
@@ -1555,7 +1023,13 @@ async def telegram_webhook(
         )
     pdf_error = None
     telegram_response_status = None
-    if response_data is not None and response_data.ready and result_verification is not None and should_send_pdf_report(calculation_result):
+    if (
+        response_data is not None
+        and response_data.ready
+        and result_verification is not None
+        and not should_skip_pdf_report(response_data)
+        and should_send_pdf_report(calculation_result)
+    ):
         try:
             stage_started_at = perf_counter()
             pdf_bytes, pdf_filename = build_pdf_report(calculation_result, result_verification)

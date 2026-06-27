@@ -35,6 +35,14 @@ def test_parse_allowed_usernames_normalizes_values() -> None:
     }
 
 
+def test_parse_allowed_usernames_supports_json_list() -> None:
+    assert parse_allowed_usernames('["@UserOne", "userTwo", "USERTHREE"]') == {
+        "userone",
+        "usertwo",
+        "userthree",
+    }
+
+
 def test_settings_safe_summary_counts_admins() -> None:
     settings = Settings(
         bot_token="placeholder-token",
