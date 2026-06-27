@@ -714,3 +714,27 @@ def test_resolve_context_general_question_keeps_state() -> None:
     assert resolved["project"] == "obvodny"
     assert resolved["metrics"] == ["fact"]
     assert resolved["last_intent"] == "general_question"
+
+
+def test_resolve_context_sales_snapshot_period_clears_stale_sales_month_filter() -> None:
+    current_state = {
+        "report_type": "sales_report",
+        "project": "obvodny",
+        "period": {"from": "2026-03-01", "to": "2026-03-31", "label": "март 2026"},
+        "metrics": ["sales_contract_revenue"],
+        "filters": {"period_month": "2026-03-01", "period_kind": "month", "scenario": "fact"},
+    }
+    parsed = LLMParsedResponse.model_validate(
+        {
+            "intent": "context_query",
+            "state_delta": {
+                "period": {"from": "2026-04-01", "to": "2026-04-30", "label": "апрель 2026"},
+            },
+            "confidence": 0.9,
+        },
+    )
+
+    resolved = resolve_context(current_state, parsed)
+
+    assert resolved["period"]["label"] == "апрель 2026"
+    assert resolved["filters"] == {"scenario": "fact"}

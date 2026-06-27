@@ -107,6 +107,13 @@ def reconcile_state_tree(
     if "metrics" in changed_fields:
         reset_fields(reconciled, {"dimension", "view"}, changed_fields)
 
+    if reconciled.get("report_type") == "sales_report" and "period" in changed_fields and "filters" not in changed_fields:
+        filters = dict(reconciled.get("filters") or {})
+        filters.pop("period_month", None)
+        if filters.get("period_kind") == "month":
+            filters.pop("period_kind", None)
+        reconciled["filters"] = filters
+
     return reconciled
 
 

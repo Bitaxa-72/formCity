@@ -182,6 +182,9 @@ def test_debt_bookings_summary_returns_safe_aggregates() -> None:
     assert calculation.row_count == 2
     assert "Брони" in draft.text
     assert "Просроченные" in draft.text
+    assert "debt_" not in draft.text
+    assert "Количество строк" in draft.text
+    assert "Сумма" in draft.text
     assert "Иванов" not in draft.text
     assert "+79999999999" not in draft.text
 

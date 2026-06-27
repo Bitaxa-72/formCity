@@ -47,7 +47,7 @@ def phone_match_is_financial_number(match: re.Match[str]) -> bool:
 def replace_phone_match(match: re.Match[str]) -> str:
     if phone_match_is_financial_number(match):
         return match.group(0)
-    return "[contact hidden]"
+    return "[контакт скрыт]"
 
 
 def text_has_phone(value: str) -> bool:
@@ -55,11 +55,11 @@ def text_has_phone(value: str) -> bool:
 
 
 def sanitize_text(value: str) -> str:
-    value = FIO_FULL_RE.sub("[person hidden]", value)
-    value = FIO_INITIALS_RE.sub("[person hidden]", value)
-    value = EMAIL_RE.sub("[contact hidden]", value)
+    value = FIO_FULL_RE.sub("[скрыто]", value)
+    value = FIO_INITIALS_RE.sub("[скрыто]", value)
+    value = EMAIL_RE.sub("[контакт скрыт]", value)
     value = PHONE_RE.sub(replace_phone_match, value)
-    return DOCUMENT_NUMBER_RE.sub(r"\1[document hidden]", value)
+    return DOCUMENT_NUMBER_RE.sub(r"\1[номер документа скрыт]", value)
 
 
 def detect_sensitive_kind(value: str) -> str | None:

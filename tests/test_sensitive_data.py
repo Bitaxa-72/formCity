@@ -45,11 +45,11 @@ def test_sensitive_columns_are_hidden_and_text_values_are_masked() -> None:
         ],
     )
 
-    assert rows == [{"name": "manager", "note": "email [contact hidden], doc № [document hidden]"}]
+    assert rows == [{"name": "manager", "note": "email [контакт скрыт], doc № [номер документа скрыт]"}]
 
 
 def test_sanitize_text_masks_contacts() -> None:
-    assert sanitize_text("phone +7 999 111-22-33 and a@b.ru") == "phone [contact hidden] and [contact hidden]"
+    assert sanitize_text("phone +7 999 111-22-33 and a@b.ru") == "phone [контакт скрыт] and [контакт скрыт]"
 
 
 def test_sanitize_text_does_not_mask_decimal_numbers() -> None:
@@ -59,7 +59,7 @@ def test_sanitize_text_does_not_mask_decimal_numbers() -> None:
 
     assert "0.665766986557602" in sanitized
     assert "123456789.12" in sanitized
-    assert "[contact hidden]" not in sanitized
+    assert "[контакт скрыт]" not in sanitized
 
 
 def test_sanitize_text_masks_person_names() -> None:
@@ -69,4 +69,4 @@ def test_sanitize_text_masks_person_names() -> None:
 
     assert "Романников" not in sanitized
     assert "Иванов Иван Иванович" not in sanitized
-    assert sanitized.count("[person hidden]") == 2
+    assert sanitized.count("[скрыто]") == 2
