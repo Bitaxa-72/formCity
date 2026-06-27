@@ -61,6 +61,7 @@ async def handle_guarded_non_data_request(
             "timings": timings,
         },
     )
+    user_session_repository.clear_state(user_id)
     user_session_repository.save_dialog_state(user_id, jsonable_encoder(state_to_save))
     await send_admin_debug(
         telegram_client,

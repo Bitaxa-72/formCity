@@ -84,6 +84,12 @@ OUT_OF_SCOPE_MARKERS = {
     "курс валют",
     "курс доллар",
 }
+LOW_SIGNAL_TEXTS = {
+    "lf",
+    "lfdfq",
+    "da",
+    "ok",
+}
 PROMPT_INJECTION_MARKERS = {
     "забудь инструкц",
     "игнорируй инструкц",
@@ -102,6 +108,8 @@ def detect_guarded_non_data_request(text: str | None) -> str | None:
         return None
 
     has_report_context = has_any_marker(normalized, REPORT_MARKERS)
+    if not has_report_context and (normalized in LOW_SIGNAL_TEXTS or (len(normalized) <= 2 and normalized.isascii())):
+        return OUT_OF_SCOPE_BLOCK_MESSAGE
     if has_any_marker(normalized, DATA_MUTATION_ACTION_MARKERS) and has_any_marker(normalized, DATA_MUTATION_OBJECT_MARKERS):
         return DATA_MUTATION_BLOCK_MESSAGE
     if has_any_marker(normalized, PROMPT_INJECTION_MARKERS):

@@ -30,6 +30,8 @@ def test_capabilities_questions_use_backend_answer(text: str) -> None:
     ("text", "expected"),
     [
         ("какая погода?", OUT_OF_SCOPE_BLOCK_MESSAGE),
+        ("lf", OUT_OF_SCOPE_BLOCK_MESSAGE),
+        ("da", OUT_OF_SCOPE_BLOCK_MESSAGE),
         ("напиши стих про стройку", OUT_OF_SCOPE_BLOCK_MESSAGE),
         ("измени данные в таблице", DATA_MUTATION_BLOCK_MESSAGE),
         ("удали строку из базы", DATA_MUTATION_BLOCK_MESSAGE),
