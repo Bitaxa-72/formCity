@@ -4,7 +4,15 @@ __pycache__/
 .pytest_cache/
 .tmp_pytest/
 .env
-formcity.db
+formcity.db*
+*.db
 *.sqlite
 *.sqlite3
 logs/
+common/
+data/
+*.xlsx
+*.xls
+*.pdf
+*.tar
+*.gz
