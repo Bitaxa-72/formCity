@@ -450,6 +450,43 @@ def test_resolve_context_report_type_clarification_keeps_collected_fields() -> N
     assert resolved["awaiting_clarification"] is False
 
 
+def test_resolve_context_report_type_data_answer_uses_clarification_base() -> None:
+    current_state = {
+        "metrics": ["fact"],
+        "filters": {"article": "marketing"},
+        "period": {"label": "may"},
+        "awaiting_clarification": True,
+        "clarification_target": "report type?",
+        "clarification_kind": "report_type",
+        "clarification_base_state": {
+            "metrics": ["fact"],
+            "filters": {"article": "marketing"},
+            "period": {"label": "may"},
+            "awaiting_clarification": False,
+            "clarification_target": None,
+            "clarification_kind": None,
+        },
+    }
+    parsed = LLMParsedResponse.model_validate(
+        {
+            "intent": "data_query",
+            "state_delta": {
+                "report_type": "payment_calendar",
+            },
+            "confidence": 0.9,
+        },
+    )
+
+    resolved = resolve_context(current_state, parsed)
+
+    assert resolved["last_intent"] == "clarification_answer"
+    assert resolved["report_type"] == "payment_calendar"
+    assert resolved["metrics"] == ["fact"]
+    assert resolved["filters"] == {"article": "marketing"}
+    assert resolved["period"]["label"] == "may"
+    assert resolved["awaiting_clarification"] is False
+
+
 def test_resolve_context_new_view_query_exits_article_clarification() -> None:
     current_state = {
         "report_type": "payment_calendar",

@@ -1438,6 +1438,82 @@ def test_telegram_webhook_sends_query_frame_clarification_when_not_ready() -> No
     assert fake_user_session_repository.saved_states[0]["data"]["awaiting_clarification"] is True
 
 
+def test_telegram_webhook_report_type_clarification_reuses_partial_query() -> None:
+    fake_llm_parser.response = LLMParsedResponse(
+        intent="data_query",
+        state_delta={
+            "metrics": ["fact"],
+            "period": {"label": "май"},
+            "filters": {"article": "Реклама"},
+        },
+        confidence=0.9,
+    )
+
+    first_response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1101,
+            "message": {
+                "message_id": 154,
+                "date": 1710000000,
+                "chat": {"id": 985, "type": "private"},
+                "from": {
+                    "id": 221,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "факт по рекламе за май",
+            },
+        },
+    )
+
+    first_body = first_response.json()
+    saved_state = fake_user_session_repository.state
+
+    assert first_response.status_code == 200
+    assert first_body["query_ready"] is False
+    assert first_body["missing_fields"] == ["report_type"]
+    assert saved_state["awaiting_clarification"] is True
+    assert saved_state["clarification_kind"] == "report_type"
+    assert saved_state["clarification_base_state"]["metrics"] == ["fact"]
+    assert saved_state["clarification_base_state"]["filters"] == {"article": "Реклама"}
+
+    fake_llm_parser.response = LLMParsedResponse(
+        intent="data_query",
+        state_delta={"report_type": "payment_calendar"},
+        confidence=0.9,
+    )
+
+    second_response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 1102,
+            "message": {
+                "message_id": 155,
+                "date": 1710000001,
+                "chat": {"id": 985, "type": "private"},
+                "from": {
+                    "id": 221,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "платежный календарь",
+            },
+        },
+    )
+
+    second_body = second_response.json()
+    query_frame = fake_calculation_engine.calls[-1]["query_frame"]
+
+    assert second_response.status_code == 200
+    assert second_body["query_ready"] is True
+    assert query_frame.report_type == "payment_calendar"
+    assert query_frame.metrics == ["fact"]
+    assert query_frame.filters == {"article": "Реклама"}
+
+
 def test_telegram_webhook_rejects_payment_calendar_sales_metric_before_domain_resolution() -> None:
     fake_llm_parser.response = LLMParsedResponse(
         intent="data_query",

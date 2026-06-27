@@ -158,8 +158,18 @@ def should_start_new_state(
     return not bool(current_state.get("report_type"))
 
 
-def is_new_query_during_clarification(parsed_response: LLMParsedResponse) -> bool:
+def is_report_type_clarification_answer(current_state: dict[str, Any], parsed_response: LLMParsedResponse) -> bool:
+    if current_state.get("clarification_kind") != "report_type":
+        return False
+    data = delta_data(parsed_response.state_delta)
+    return set(data) == {"report_type"}
+
+
+def is_new_query_during_clarification(current_state: dict[str, Any], parsed_response: LLMParsedResponse) -> bool:
     if parsed_response.intent not in {Intent.DATA_QUERY, Intent.DIMENSION_QUERY, Intent.CONTEXT_QUERY}:
+        return False
+
+    if is_report_type_clarification_answer(current_state, parsed_response):
         return False
 
     data = delta_data(parsed_response.state_delta)
@@ -244,7 +254,7 @@ def resolve_context(
 ) -> dict[str, Any]:
     normalized_current_state = normalize_state(current_state)
     is_clarification_mode = bool(normalized_current_state.get("awaiting_clarification"))
-    if is_clarification_mode and is_new_query_during_clarification(parsed_response):
+    if is_clarification_mode and is_new_query_during_clarification(normalized_current_state, parsed_response):
         is_clarification_mode = False
 
     effective_intent = parsed_response.intent

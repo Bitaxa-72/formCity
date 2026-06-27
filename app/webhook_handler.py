@@ -706,7 +706,12 @@ async def process_telegram_webhook(
         }
 
     if not query_frame.ready:
-        clarification_kind = "dimension" if "dimension" in query_frame.missing_fields else None
+        if "dimension" in query_frame.missing_fields:
+            clarification_kind = "dimension"
+        elif "report_type" in query_frame.missing_fields:
+            clarification_kind = "report_type"
+        else:
+            clarification_kind = None
         resolved_state = set_clarification_state(
             resolved_state,
             query_frame.clarification_question,
