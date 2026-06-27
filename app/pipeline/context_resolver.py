@@ -200,15 +200,16 @@ def should_discard_incompatible_report_context(
     parsed_response: LLMParsedResponse,
     is_clarification_mode: bool,
 ) -> bool:
-    if is_clarification_mode:
-        return False
     if parsed_response.intent not in {Intent.DATA_QUERY, Intent.DIMENSION_QUERY, Intent.CONTEXT_QUERY}:
         return False
     if delta_has_report_type(parsed_response.state_delta):
         return False
-    if not current_state.get("report_type"):
+
+    base_state = current_state.get("clarification_base_state")
+    report_state = normalize_state(base_state) if is_clarification_mode and isinstance(base_state, dict) else current_state
+    if not report_state.get("report_type"):
         return False
-    return not delta_is_compatible_with_report(current_state.get("report_type"), parsed_response.state_delta)
+    return not delta_is_compatible_with_report(report_state.get("report_type"), parsed_response.state_delta)
 
 
 def is_report_type_clarification_answer(current_state: dict[str, Any], parsed_response: LLMParsedResponse) -> bool:

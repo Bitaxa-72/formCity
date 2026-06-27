@@ -744,6 +744,44 @@ def test_resolve_context_discards_report_when_partial_query_has_incompatible_key
     assert resolved["period"]["label"] == "май 2026"
 
 
+def test_resolve_context_discards_clarification_report_when_answer_has_incompatible_keys() -> None:
+    current_state = {
+        "report_type": "agents_report",
+        "project": "obvodny",
+        "period": {"from": "2026-04-01", "to": "2026-04-30", "label": "апрель 2026"},
+        "metrics": ["agents_commission_amount"],
+        "filters": {},
+        "awaiting_clarification": True,
+        "clarification_target": "Уточните период.",
+        "clarification_base_state": {
+            "report_type": "agents_report",
+            "project": "obvodny",
+            "period": {"from": "2026-04-01", "to": "2026-04-30", "label": "апрель 2026"},
+            "metrics": ["agents_commission_amount"],
+            "filters": {},
+        },
+    }
+    parsed = LLMParsedResponse.model_validate(
+        {
+            "intent": "data_query",
+            "state_delta": {
+                "period": {"from": "2026-05-01", "to": "2026-05-31", "label": "май 2026"},
+                "metrics": ["fact"],
+                "filters": {"article": "реклама"},
+            },
+            "confidence": 0.9,
+        },
+    )
+
+    resolved = resolve_context(current_state, parsed)
+
+    assert resolved["report_type"] is None
+    assert resolved["metrics"] == ["fact"]
+    assert resolved["filters"] == {"article": "реклама"}
+    assert resolved["period"]["label"] == "май 2026"
+    assert resolved["awaiting_clarification"] is False
+
+
 def test_resolve_context_keeps_report_when_partial_query_has_compatible_keys() -> None:
     current_state = {
         "report_type": "agents_report",
