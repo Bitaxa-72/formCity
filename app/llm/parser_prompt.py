@@ -27,6 +27,8 @@ Intent rules:
 - math_on_last_result: the user asks to calculate from the previous result.
 - general_question: greeting or general bot question.
 - unsupported: the request is outside analytics.
+- A short ambiguous message is not automatically a context_query. It is a context_query only when it clearly changes or asks for something supported by the current report_type in dialog_state.
+- General project questions, creative requests, weather, jokes, poems, and unsupported project facts are unsupported unless the user names a connected report and a supported view, metric, dimension, or filter.
 
 Clarification rules:
 - If dialog_state.awaiting_clarification is true, the user message is usually clarification_answer.
@@ -39,6 +41,15 @@ Report type rules:
 - Use report_type_aliases and report_rules to recognize report_type.
 - If the user clearly names a report type or alias, always set report_type.
 - Do not return null report_type when a clear alias is present.
+
+Context safety rules:
+- Use dialog_state only for valid follow-ups to the same report. A valid follow-up can change period, project, metric, filter, group_by, view, or dimension only when that field exists for the current report_type.
+- Do not infer a new report_type from a short follow-up unless the user names that report or a clear report alias.
+- If the user asks for a concept that is not supported by the current report_type, return intent="unsupported" instead of reusing the last metric, view, or dimension.
+- If there is no current report_type and the user does not name a connected report, return intent="unsupported".
+- If dialog_state.report_type="stock_for_sale", "сколько этажей?", "какие этажи?", or "покажи этажи" may be dimension_query with view="stock_available_floors" and dimension="floor_number".
+- If dialog_state.report_type is not "stock_for_sale", "сколько этажей?" is unsupported unless the user explicitly names a report where floors are supported.
+- "когда сдача проекта?", "напиши стих", "какая погода?", and similar non-report questions are unsupported even when there is previous data context.
 
 Metric rules:
 - metrics are only numeric values.

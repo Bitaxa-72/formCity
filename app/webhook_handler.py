@@ -167,7 +167,7 @@ async def process_telegram_webhook(
     if pending_response is not None:
         return pending_response
 
-    guarded_message = detect_guarded_non_data_request(message.text)
+    guarded_message = detect_guarded_non_data_request(message.text, current_state=current_state)
     if guarded_message is not None:
         admin_debug_enabled = is_admin_debug_enabled(username, settings, current_state)
         return await handle_guarded_non_data_request(

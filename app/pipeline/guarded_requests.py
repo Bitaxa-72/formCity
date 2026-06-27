@@ -116,7 +116,23 @@ def has_any_marker(text: str, markers: set[str]) -> bool:
     return any(marker in text for marker in markers)
 
 
-def detect_guarded_non_data_request(text: str | None) -> str | None:
+def _current_report_type(current_state: dict | None) -> str | None:
+    if not isinstance(current_state, dict):
+        return None
+    report_type = current_state.get("report_type")
+    if isinstance(report_type, str) and report_type:
+        return report_type
+    return None
+
+
+def _is_context_supported_out_of_scope_phrase(normalized: str, current_state: dict | None) -> bool:
+    report_type = _current_report_type(current_state)
+    if report_type == "stock_for_sale" and "сколько этаж" in normalized:
+        return True
+    return False
+
+
+def detect_guarded_non_data_request(text: str | None, current_state: dict | None = None) -> str | None:
     normalized = normalize_search_text(text or "")
     if not normalized:
         return None
@@ -130,6 +146,10 @@ def detect_guarded_non_data_request(text: str | None) -> str | None:
         return TECHNICAL_DISCLOSURE_BLOCK_MESSAGE
     if not has_report_context and has_any_marker(normalized, TECHNICAL_MARKERS):
         return TECHNICAL_DISCLOSURE_BLOCK_MESSAGE
-    if not has_report_context and has_any_marker(normalized, OUT_OF_SCOPE_MARKERS):
+    if (
+        not has_report_context
+        and has_any_marker(normalized, OUT_OF_SCOPE_MARKERS)
+        and not _is_context_supported_out_of_scope_phrase(normalized, current_state)
+    ):
         return OUT_OF_SCOPE_BLOCK_MESSAGE
     return None

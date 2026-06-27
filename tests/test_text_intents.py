@@ -62,3 +62,17 @@ def test_guarded_non_data_requests_use_backend_answer(text: str, expected: str) 
 )
 def test_guarded_non_data_requests_do_not_block_report_queries(text: str) -> None:
     assert detect_guarded_non_data_request(text) is None
+
+
+def test_guarded_floor_question_uses_stock_context() -> None:
+    assert detect_guarded_non_data_request(
+        "сколько этажей?",
+        current_state={"report_type": "stock_for_sale"},
+    ) is None
+
+
+def test_guarded_floor_question_without_stock_context_stays_out_of_scope() -> None:
+    assert detect_guarded_non_data_request(
+        "сколько этажей?",
+        current_state={"report_type": "payment_calendar"},
+    ) == OUT_OF_SCOPE_BLOCK_MESSAGE
