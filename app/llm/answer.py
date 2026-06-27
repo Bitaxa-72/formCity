@@ -1,4 +1,20 @@
 from app.llm.answer_labels import *
+
+
+TEMPLATE_REPORT_TYPES = {
+    "payment_calendar",
+    "roadmap",
+    "model",
+    "non_project_expenses",
+    "debt_and_bookings",
+    "stock_for_sale",
+    "sales_report",
+    "sales_plan_execution",
+    "agents_report",
+    "summary",
+}
+
+
 def format_number(value: object) -> str:
     if value is None:
         return "нет данных"
@@ -587,7 +603,7 @@ class OpenAILLMAnswerer:
     async def build_answer(self, response_data: ResponseData | None) -> AnswerDraft:
         if response_data is None or not response_data.ready:
             return build_unready_answer(response_data)
-        if response_data.source.get("report_type") in {"payment_calendar", "roadmap", "model", "non_project_expenses", "debt_and_bookings", "stock_for_sale", "sales_report"}:
+        if response_data.source.get("report_type") in TEMPLATE_REPORT_TYPES:
             return build_fallback_answer(response_data)
         table_answer = build_table_answer(response_data)
         if table_answer is not None:

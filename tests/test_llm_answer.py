@@ -1,7 +1,10 @@
+import asyncio
+
 import pytest
 from pydantic import ValidationError
 
-from app.llm.answer import AnswerDraft, build_fallback_answer, build_unready_answer, validate_answer_payload
+from app.core.config import Settings
+from app.llm.answer import AnswerDraft, OpenAILLMAnswerer, build_fallback_answer, build_unready_answer, validate_answer_payload
 from app.pipeline.response_data import ResponseData
 
 
@@ -362,3 +365,39 @@ def test_build_fallback_answer_prints_dimension_article_kind_list() -> None:
     assert "- Поступления" in draft.text
     assert "- Итого платежи" in draft.text
     assert "- Статья расходов" in draft.text
+
+
+def test_openai_answerer_uses_template_for_summary_without_openai_key() -> None:
+    response_data = ResponseData(
+        ready=True,
+        title="Сводный отчет",
+        summary=[],
+        table={
+            "columns": ["project", "summary_sheet_count", "summary_row_count", "summary_cell_count"],
+            "rows": [
+                {
+                    "project": "obvodny",
+                    "summary_sheet_count": 3,
+                    "summary_row_count": 120,
+                    "summary_cell_count": 900,
+                },
+            ],
+            "total_rows": 1,
+            "truncated": False,
+        },
+        source={
+            "report_type": "summary",
+            "project": "obvodny",
+            "metrics": ["summary_sheet_count", "summary_row_count", "summary_cell_count"],
+        },
+        warnings=[],
+        errors=[],
+    )
+
+    answerer = OpenAILLMAnswerer(Settings(bot_token=None, allowed_usernames=set()))
+
+    draft = asyncio.run(answerer.build_answer(response_data))
+
+    assert "Сводный отчет" in draft.text
+    assert "Количество листов: 3" in draft.text
+    assert "Количество строк: 120" in draft.text
