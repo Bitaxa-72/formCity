@@ -59,6 +59,14 @@ RULE: dict[str, object] = {
                 "aliases": ["типы строк", "виды строк"],
                 "meaning": "список типов строк сводных таблиц",
             },
+            PaymentCalendarView.SUMMARY_ROWS.value: {
+                "aliases": ["подробно", "детально", "строки", "данные", "покажи таблицу"],
+                "meaning": "безопасные строки сводных таблиц без запрещенных колонок",
+            },
+            PaymentCalendarView.SUMMARY_SEARCH.value: {
+                "aliases": ["найди", "поиск", "поищи"],
+                "meaning": "поиск по безопасным строкам и ячейкам сводных таблиц",
+            },
         },
         "filters": {
             Dimension.SHEET_KIND.value: {

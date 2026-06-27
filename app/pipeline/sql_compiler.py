@@ -7,6 +7,7 @@ from app.pipeline.query_frame import QueryFrame
 from app.reports.model.catalog import MODEL_RAW_VIEWS
 from app.reports.registry import SQL_TEMPLATES
 from app.reports.sql import ReportSQLTemplate
+from app.reports.summary.catalog import SUMMARY_RAW_VIEWS
 
 
 class SQLCompileError(Exception):
@@ -32,6 +33,23 @@ RAW_SHEET_ALIASES = {
     "remains": "remains",
     "остатки": "remains",
     "остаток": "remains",
+    "fm": "fm",
+    "фм": "fm",
+    "фм_": "fm",
+    "fm_plan": "fm_plan",
+    "фм план": "fm_plan",
+    "фм_план": "fm_plan",
+    "newkpi": "newkpi",
+    "newkpi's": "newkpi",
+    "newkpi_plan": "newkpi_plan",
+    "newkpi план": "newkpi_plan",
+    "newkpi's план": "newkpi_plan",
+    "passport": "passport",
+    "паспорт": "passport",
+    "rates": "rates",
+    "проценты": "rates",
+    "comparison": "comparison",
+    "сравнение": "comparison",
 }
 
 
@@ -143,6 +161,93 @@ def compile_model_raw_sql(frame: QueryFrame) -> SQLQuery:
     if frame.view in {"model_raw_rows", "model_raw_search"}:
         return compile_model_raw_rows_sql(frame)
     raise SQLCompileError("unknown_model_raw_view")
+
+
+def append_summary_common_filters(frame: QueryFrame, where_parts: list[str], params: dict[str, Any]) -> None:
+    if frame.project and frame.project != "all":
+        where_parts.append("r.project = :project")
+        params["project"] = frame.project
+
+    simple_filters = {
+        "source_file": "r.source_file",
+        "sheet_name": "r.sheet_name",
+        "sheet_kind": "r.sheet_kind",
+        "row_type": "r.row_type",
+        "header_key": "c.header_key",
+    }
+    contains_filters = {
+        "header_key_contains": "c.header_key",
+        "header_label_contains": "c.header_label",
+        "row_label_contains": "r.row_label",
+        "value_text_contains": "c.value_text",
+    }
+    for name, column in simple_filters.items():
+        value = frame.filters.get(name)
+        if value is not None:
+            where_parts.append(f"{column} = :{name}")
+            params[name] = value
+    for name, column in contains_filters.items():
+        value = frame.filters.get(name)
+        if isinstance(value, str) and value.strip():
+            where_parts.append(f"{column} LIKE :{name}")
+            params[name] = f"%{value.strip()}%"
+
+
+def compile_summary_raw_rows_sql(frame: QueryFrame) -> SQLQuery:
+    where_parts = ["c.is_sensitive = 0"]
+    params: dict[str, Any] = {}
+    append_summary_common_filters(frame, where_parts, params)
+
+    raw_query = frame.filters.get("raw_query")
+    if isinstance(raw_query, str) and raw_query.strip():
+        where_parts.append(
+            "(\n"
+            "    r.row_label LIKE :raw_query\n"
+            "    OR c.header_label LIKE :raw_query\n"
+            "    OR c.value_text LIKE :raw_query\n"
+            "  )",
+        )
+        params["raw_query"] = f"%{raw_query.strip()}%"
+
+    where_sql = "\nWHERE " + "\n  AND ".join(where_parts)
+    return SQLQuery(
+        sql=(
+            "SELECT\n"
+            "  r.project AS project,\n"
+            "  r.source_file AS source_file,\n"
+            "  r.sheet_name AS sheet_name,\n"
+            "  r.sheet_kind AS sheet_kind,\n"
+            "  r.row_number AS row_number,\n"
+            "  r.row_type AS row_type,\n"
+            "  r.row_label AS row_label,\n"
+            "  r.period_label AS period_label,\n"
+            "  r.unit_number AS unit_number,\n"
+            "  COUNT(c.id) AS visible_cells,\n"
+            "  GROUP_CONCAT(\n"
+            "    COALESCE(c.header_label, c.column_letter) || ': ' || COALESCE(c.value_text, CAST(c.value_number AS TEXT), c.value_date, CAST(c.value_bool AS TEXT)),\n"
+            "    ' | '\n"
+            "  ) AS values_preview\n"
+            "FROM summary_rows r\n"
+            "JOIN summary_cells c\n"
+            "  ON c.project = r.project\n"
+            "  AND c.source_file = r.source_file\n"
+            "  AND c.sheet_name = r.sheet_name\n"
+            "  AND c.row_number = r.row_number"
+            f"{where_sql}\n"
+            "GROUP BY r.project, r.source_file, r.sheet_name, r.sheet_kind, r.row_number, r.row_type, r.row_label, r.period_label, r.unit_number\n"
+            "ORDER BY r.project, r.source_file, r.sheet_name, r.row_number"
+        ),
+        params=params,
+        table="summary_rows",
+        metrics=[],
+        group_by=["summary_row"],
+    )
+
+
+def compile_summary_raw_sql(frame: QueryFrame) -> SQLQuery:
+    if frame.view in SUMMARY_RAW_VIEWS:
+        return compile_summary_raw_rows_sql(frame)
+    raise SQLCompileError("unknown_summary_raw_view")
 
 
 def build_filter_clause(column: str, param_name: str, value: Any) -> tuple[str, dict[str, Any]]:
@@ -289,6 +394,8 @@ def compile_sql(frame: QueryFrame, metric_resolution: MetricResolution) -> SQLQu
 
     if frame.report_type == "model" and frame.view in MODEL_RAW_VIEWS:
         return compile_model_raw_sql(frame)
+    if frame.report_type == "summary" and frame.view in SUMMARY_RAW_VIEWS:
+        return compile_summary_raw_sql(frame)
 
     template = SQL_TEMPLATES.get(frame.report_type or "")
     if template is None:

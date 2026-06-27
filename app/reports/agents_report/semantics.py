@@ -9,6 +9,8 @@ AGENTS_REPORT_LIST_VIEWS = {
     "agents_available_budget_months": "budget_month",
     "agents_available_payment_months": "payment_period_month",
     "agents_available_value_kinds": "value_kind",
+    "agents_available_agents": "agent",
+    "agents_available_unit_numbers": "unit_number",
 }
 
 
@@ -34,6 +36,8 @@ def apply_agents_report_view(frame: QueryFrame) -> QueryFrame:
         if dimension in {"payment_period_month", "value_kind"}:
             filters["source_kind"] = "monthly"
         if dimension == "budget_month":
+            filters["source_kind"] = "deals"
+        if dimension in {"agent", "unit_number"}:
             filters["source_kind"] = "deals"
         return frame.model_copy(
             update={

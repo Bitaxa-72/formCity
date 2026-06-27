@@ -66,6 +66,7 @@ METRIC_LABELS = {
     "summary_numeric_cell_count": "Числовые ячейки",
     "summary_value_sum": "Сумма значений",
     "unit_number": "Номер помещения",
+    "agent": "Агент",
 }
 
 UNIT_LABELS = {

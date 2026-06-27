@@ -42,18 +42,25 @@ HEADER_KEYWORDS = (
     "корпус",
     "класс",
 )
-SENSITIVE_HEADER_PARTS = (
-    "фио",
-    "клиент",
-    "агент",
+SENSITIVE_HEADER_LABELS = {
+    "фио клиента",
+    "номер договора брони",
+    "номер дду",
+    "номер регистрации",
     "менеджер",
-    "дду",
-    "договор",
-    "дкп",
-    "бронь",
-    "примеч",
-    "контакт",
-)
+    "примечание",
+    "номер договора уступки",
+    "номер регистрации дупт",
+    "№ регистрации дс к дду",
+    "дата и № реестра",
+    "№ дду",
+    "№ регистрации",
+    "№ пп госпошлина",
+    "№ расписки мфц",
+    "№ пиб",
+    "фио агента с 10 03 2026 года",
+    "телефон клиента с 10 03 2026 года",
+}
 MONTH_LABEL_RE = re.compile(
     r"^(январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)\s+\d{4}$",
     re.IGNORECASE,
@@ -219,13 +226,27 @@ def classify_value(value: Any) -> tuple[str, str | None, Decimal | None, date | 
 
 def is_sensitive_header(header_label: str | None) -> bool:
     normalized = normalize_search_text(header_label)
-    return any(part in normalized for part in SENSITIVE_HEADER_PARTS)
+    normalized_plain = re.sub(r"[^0-9a-zа-я№]+", " ", normalized)
+    normalized_plain = re.sub(r"\s+", " ", normalized_plain).strip()
+    return normalized in SENSITIVE_HEADER_LABELS or normalized_plain in SENSITIVE_HEADER_LABELS
 
 
 def find_value_by_header(raw_values: dict[str, Any], *needles: str) -> str | None:
     for key, value in raw_values.items():
         normalized = normalize_search_text(key)
         if all(needle in normalized for needle in needles):
+            return normalize_text(value)
+    return None
+
+
+def find_unit_number(raw_values: dict[str, Any]) -> str | None:
+    allowed_markers = ("помещ", "апарт", "кварт")
+    blocked_markers = ("цена", "стоим", "площад", "кол", "колич", "итого", "сумм", "м2", "м²")
+    for key, value in raw_values.items():
+        normalized = normalize_search_text(key)
+        if any(marker in normalized for marker in allowed_markers) and not any(
+            marker in normalized for marker in blocked_markers
+        ):
             return normalize_text(value)
     return None
 
@@ -304,17 +325,9 @@ def parse_summary_file(
                 sheet_cell_count += 1
 
             customer_name = find_value_by_header(raw_values, "фио") or find_value_by_header(raw_values, "клиент")
-            unit_number = (
-                find_value_by_header(raw_values, "помещ")
-                or find_value_by_header(raw_values, "апарт")
-                or find_value_by_header(raw_values, "кв")
-                or find_value_by_header(raw_values, "номер")
-            )
             period_label = row_label if row_label and MONTH_LABEL_RE.match(row_label) else None
             row_type = classify_row(row_number, header_row, row_label, len(values))
-            if customer_name:
-                row_sensitive = True
-
+            unit_number = find_unit_number(raw_values) if row_type == "detail" else None
             rows_out.append(
                 SummaryRow(
                     project=project,

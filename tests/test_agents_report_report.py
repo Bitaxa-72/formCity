@@ -286,7 +286,7 @@ def test_agents_sensitive_request_is_blocked() -> None:
     assert calculation is None
     assert query is None
     assert "не вывожу" in compatibility.message
-    assert "список агентов" in compatibility.message
+    assert "номера ДДУ" in compatibility.message
 
 
 def test_agents_correction_recognizes_monthly_report() -> None:

@@ -69,6 +69,14 @@ RULE: dict[str, object] = {
                 "aliases": ["какие графики", "типы графиков", "дду уступка"],
                 "meaning": "список типов помесячных графиков",
             },
+            PaymentCalendarView.AGENTS_AVAILABLE_AGENTS.value: {
+                "aliases": ["какие агенты", "список агентов", "наименования агентов"],
+                "meaning": "список наименований агентов",
+            },
+            PaymentCalendarView.AGENTS_AVAILABLE_UNIT_NUMBERS.value: {
+                "aliases": ["номера помещений", "какие помещения", "список помещений"],
+                "meaning": "список номеров помещений",
+            },
         },
         "filters": {
             Dimension.VALUE_KIND.value: {
@@ -84,11 +92,15 @@ RULE: dict[str, object] = {
             GroupBy.BUDGET_MONTH.value: ["по бюджетным месяцам", "по бюджету"],
             GroupBy.PAYMENT_PERIOD_MONTH.value: ["по месяцам", "помесячно", "по месяцам оплат"],
             GroupBy.VALUE_KIND.value: ["по типам графиков", "дду и уступка"],
+            GroupBy.AGENT.value: ["по агентам", "по наименованиям агентов"],
+            GroupBy.UNIT_NUMBER.value: ["по помещениям", "по номерам помещений"],
         },
         "dimensions": {
             Dimension.SNAPSHOT_MONTH.value: ["какие срезы", "доступные срезы"],
             Dimension.BUDGET_MONTH.value: ["какие бюджетные месяцы", "месяцы бюджета"],
             Dimension.PAYMENT_PERIOD_MONTH.value: ["какие месяцы оплат", "периоды оплат"],
             Dimension.VALUE_KIND.value: ["какие графики", "типы графиков"],
+            Dimension.AGENT.value: ["какие агенты", "список агентов", "наименования агентов"],
+            Dimension.UNIT_NUMBER.value: ["номера помещений", "какие помещения", "список помещений"],
         },
     }

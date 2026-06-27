@@ -76,7 +76,7 @@ def test_parse_summary_file_reads_rows_cells_and_sensitive_marks(tmp_path) -> No
     price_cell = next(cell for cell in cells if cell.sheet_name == "Апартаменты" and cell.row_number == 4 and cell.header_key == "цена_дду")
     assert price_cell.value_type == "number"
     assert price_cell.value_number == 12000000
-    assert price_cell.is_sensitive is True
+    assert price_cell.is_sensitive is False
 
     area_cell = next(cell for cell in cells if cell.sheet_name == "Сводная" and cell.row_number == 4 and cell.header_key == "площадь")
     assert area_cell.value_number == 42.5

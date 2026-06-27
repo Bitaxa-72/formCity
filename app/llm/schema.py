@@ -194,6 +194,8 @@ class PaymentCalendarView(StrEnum):
     AGENTS_AVAILABLE_BUDGET_MONTHS = "agents_available_budget_months"
     AGENTS_AVAILABLE_PAYMENT_MONTHS = "agents_available_payment_months"
     AGENTS_AVAILABLE_VALUE_KINDS = "agents_available_value_kinds"
+    AGENTS_AVAILABLE_AGENTS = "agents_available_agents"
+    AGENTS_AVAILABLE_UNIT_NUMBERS = "agents_available_unit_numbers"
     SUMMARY_OVERVIEW = "summary_overview"
     SUMMARY_VALUES = "summary_values"
     SUMMARY_AVAILABLE_PROJECTS = "summary_available_projects"
@@ -202,6 +204,8 @@ class PaymentCalendarView(StrEnum):
     SUMMARY_AVAILABLE_SHEET_KINDS = "summary_available_sheet_kinds"
     SUMMARY_AVAILABLE_HEADERS = "summary_available_headers"
     SUMMARY_AVAILABLE_ROW_TYPES = "summary_available_row_types"
+    SUMMARY_ROWS = "summary_rows"
+    SUMMARY_SEARCH = "summary_search"
 
 
 class Dimension(StrEnum):
@@ -224,6 +228,7 @@ class Dimension(StrEnum):
     PAYMENT_TYPE = "payment_type"
     UNIT_NUMBER = "unit_number"
     ROW_LABEL = "row_label"
+    AGENT = "agent"
     PROPERTY_TYPE = "property_type"
     FLOOR_NUMBER = "floor_number"
     SEGMENT = "segment"

@@ -171,7 +171,7 @@ def mark_model(path: Path, wb) -> None:
             for cell in row:
                 if not value_present(cell.value):
                     continue
-                fill = FILL_RED if detect_sensitive_kind(str(cell.value)) else FILL_BLUE
+                fill = FILL_RED if detect_sensitive_kind(str(cell.value)) else FILL_GREEN
                 set_fill(cell, fill)
 
 
@@ -183,8 +183,7 @@ def mark_non_project_expenses(path: Path, wb) -> None:
             cell = ws.cell(item.source_row, column)
             if not value_present(cell.value):
                 continue
-            fill = FILL_RED if detect_sensitive_kind(str(cell.value)) else FILL_GREEN
-            set_fill(cell, fill)
+            set_fill(cell, FILL_GREEN)
         mark_cell(ws, 1, 3, FILL_GREEN)
 
 
@@ -235,16 +234,13 @@ def mark_agents_report(path: Path, wb) -> None:
     columns = agents_report.build_columns(headers)
     monthly_blocks = agents_report.find_monthly_blocks(headers)
     _, deals, monthly_values = agents_report.parse_agents_report_file(path, "obvodny")
-    red_fields = {"agent_name", "buyer_name", "ddu_number", "act_info"}
-    blue_fields = {"unit_number", "note"}
+    red_fields = {"buyer_name", "ddu_number", "act_info", "note"}
     for deal in deals:
         for field, column in columns.items():
             if column is None:
                 continue
             if field in red_fields:
                 fill = FILL_RED
-            elif field in blue_fields:
-                fill = FILL_BLUE
             else:
                 fill = FILL_GREEN
             mark_cell(ws, deal.source_row, column, fill)
@@ -291,7 +287,7 @@ def mark_summary(path: Path, wb) -> None:
     for item in cells:
         if item.sheet_name not in wb.sheetnames:
             continue
-        fill = FILL_RED if item.is_sensitive else FILL_BLUE
+        fill = FILL_RED if item.is_sensitive else FILL_GREEN
         mark_cell(wb[item.sheet_name], item.row_number, item.column_number, fill)
 
 

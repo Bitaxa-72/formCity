@@ -1,5 +1,5 @@
 from app.pipeline.query_frame import QueryFrame, QueryPeriod
-from app.reports.summary.catalog import SUMMARY_DEFAULT_METRICS, SUMMARY_VALUE_METRICS
+from app.reports.summary.catalog import SUMMARY_DEFAULT_METRICS, SUMMARY_RAW_VIEWS, SUMMARY_VALUE_METRICS
 
 
 SUMMARY_LIST_VIEWS = {
@@ -54,6 +54,21 @@ def apply_summary_view(frame: QueryFrame) -> QueryFrame:
                 **base_update,
                 "filters": filters,
                 "metrics": [],
+                "group_by": [],
+                "ready": True,
+                "missing_fields": [],
+                "clarification_question": None,
+            },
+        )
+
+    if frame.view in SUMMARY_RAW_VIEWS:
+        filters = dict(frame.filters)
+        filters["is_sensitive"] = False
+        return frame.model_copy(
+            update={
+                **base_update,
+                "metrics": [],
+                "filters": filters,
                 "group_by": [],
                 "ready": True,
                 "missing_fields": [],

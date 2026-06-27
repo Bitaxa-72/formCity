@@ -45,6 +45,13 @@ SHEET_CONSOLIDATION = "\u0414\u043b\u044f \u043a\u043e\u043d\u0441\u043e\u043b\u
 SHEET_FINMODEL = "\u0424\u0438\u043d\u043c\u043e\u0434\u0435\u043b\u044c"
 SHEET_REMAINS = "\u041e\u0441\u0442\u0430\u0442\u043a\u0438"
 RAW_MODEL_SHEETS = {
+    SHEET_FM: "fm",
+    SHEET_FM_PLAN: "fm_plan",
+    SHEET_KPI: "newkpi",
+    SHEET_KPI_PLAN: "newkpi_plan",
+    SHEET_COMPARISON: "comparison",
+    SHEET_PASSPORT: "passport",
+    SHEET_RATES: "rates",
     SHEET_CONSOLIDATION: "consolidation",
     SHEET_FINMODEL: "financial_model",
     SHEET_REMAINS: "remains",

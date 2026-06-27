@@ -32,6 +32,18 @@ HEADER_ALIASES = {
     "цена 1 кв м": "цена_1_кв_м",
     "цена брони": "цена_брони",
 }
+SUMMARY_RAW_ROW_MARKERS = (
+    "подробно",
+    "детально",
+    "строки",
+    "данные",
+    "покажи таблицу",
+)
+SUMMARY_SEARCH_MARKERS = (
+    "найди",
+    "поиск",
+    "поищи",
+)
 PROJECT_ALIASES = {
     "moskovsky": ("московский", "мск"),
     "obvodny": ("обводный", "обвод"),
@@ -72,6 +84,31 @@ def summary_response(
         state_delta=StateDelta.model_validate(state_delta),
         confidence=1,
     )
+
+
+def extract_summary_raw_query(normalized_text: str) -> str | None:
+    stop_words = {
+        "сводный",
+        "отчет",
+        "сводная",
+        "таблица",
+        "таблицы",
+        "найди",
+        "поиск",
+        "поищи",
+        "покажи",
+        "данные",
+        "строки",
+        "подробно",
+        "детально",
+        "по",
+        "в",
+        "на",
+        "из",
+    }
+    tokens = [token for token in normalized_text.split() if token not in stop_words]
+    query = " ".join(tokens).strip()
+    return query or None
 
 
 def extract_sheet_kind(normalized_text: str) -> str | None:
@@ -118,6 +155,15 @@ def build_summary_correction(text: str | None) -> LLMParsedResponse | None:
         return summary_response("summary_available_headers", filters=filters, dimension="header_key", intent=Intent.DIMENSION_QUERY, project=project)
     if any(marker in normalized_text for marker in ("типы строк", "виды строк")):
         return summary_response("summary_available_row_types", filters=filters, dimension="row_type", intent=Intent.DIMENSION_QUERY, project=project)
+
+    if any(marker in normalized_text for marker in SUMMARY_SEARCH_MARKERS):
+        raw_query = extract_summary_raw_query(normalized_text)
+        if raw_query:
+            filters["raw_query"] = raw_query
+        return summary_response("summary_search", filters=filters, project=project)
+
+    if any(marker in normalized_text for marker in SUMMARY_RAW_ROW_MARKERS):
+        return summary_response("summary_rows", filters=filters, project=project)
 
     header_key = extract_header_key(normalized_text)
     if header_key:

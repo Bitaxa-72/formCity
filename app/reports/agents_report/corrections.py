@@ -52,13 +52,21 @@ def extract_agents_period_label(text: str | None) -> str | None:
     return " ".join(part for part in match.groups() if part)
 
 
-def agents_response(view: str, metrics: list[str], filters: dict[str, object] | None = None, dimension: str | None = None, intent: Intent = Intent.DATA_QUERY, text: str | None = None) -> LLMParsedResponse:
+def agents_response(
+    view: str,
+    metrics: list[str],
+    filters: dict[str, object] | None = None,
+    dimension: str | None = None,
+    group_by: list[str] | None = None,
+    intent: Intent = Intent.DATA_QUERY,
+    text: str | None = None,
+) -> LLMParsedResponse:
     state_delta: dict[str, object] = {
         "report_type": "agents_report",
         "view": view,
         "metrics": metrics,
         "filters": filters or {},
-        "group_by": [],
+        "group_by": group_by or [],
     }
     if dimension:
         state_delta["dimension"] = dimension
@@ -85,9 +93,17 @@ def build_agents_report_correction(text: str | None) -> LLMParsedResponse | None
         return agents_response("agents_available_payment_months", [], dimension="payment_period_month", intent=Intent.DIMENSION_QUERY, text=text)
     if any(marker in normalized_text for marker in ("какие графики", "типы графиков", "дду уступка")):
         return agents_response("agents_available_value_kinds", [], dimension="value_kind", intent=Intent.DIMENSION_QUERY, text=text)
+    if any(marker in normalized_text for marker in ("какие агенты", "список агентов", "наименования агентов")):
+        return agents_response("agents_available_agents", [], dimension="agent", intent=Intent.DIMENSION_QUERY, text=text)
+    if any(marker in normalized_text for marker in ("номера помещ", "какие помещ", "список помещ")):
+        return agents_response("agents_available_unit_numbers", [], dimension="unit_number", intent=Intent.DIMENSION_QUERY, text=text)
 
     if any(marker in normalized_text for marker in ("помесяч", "по месяц", "график")):
         return agents_response("agents_monthly", ["agents_monthly_value"], text=text)
+    if any(marker in normalized_text for marker in ("по агент", "по наименован")):
+        return agents_response("agents_summary", [], group_by=["agent"], text=text)
+    if any(marker in normalized_text for marker in ("по помещ", "по номерам помещ")):
+        return agents_response("agents_summary", [], group_by=["unit_number"], text=text)
     if any(marker in normalized_text for marker in ("по бюдж", "бюджет")):
         return agents_response("agents_by_budget_month", [], text=text)
     if any(marker in normalized_text for marker in ("дду", "уступк", "меблиров")):

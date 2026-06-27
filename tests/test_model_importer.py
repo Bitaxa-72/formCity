@@ -51,12 +51,12 @@ def test_import_model_reads_sources_monthly_and_kpi(tmp_path) -> None:
         assert session.query(ModelSource).count() == 1
         assert session.query(ModelMonthlyFact).count() == 2
         assert session.query(ModelKpiFact).count() == 1
-        assert result.raw_sheets == 1
-        assert result.raw_rows == 2
-        assert result.raw_cells == 4
-        assert session.query(ModelRawSheet).count() == 1
-        assert session.query(ModelRawRow).count() == 2
-        assert session.query(ModelRawCell).count() == 4
+        assert result.raw_sheets == 4
+        assert result.raw_rows == 9
+        assert result.raw_cells == 16
+        assert session.query(ModelRawSheet).count() == 4
+        assert session.query(ModelRawRow).count() == 9
+        assert session.query(ModelRawCell).count() == 16
         assert session.query(ModelMonthlyFact).filter_by(scenario="current").one().value == 100
         assert session.query(ModelMonthlyFact).filter_by(scenario="current").one().metric_key == "model_revenue"
         assert session.query(ModelKpiFact).one().metric_key == "model_npv"

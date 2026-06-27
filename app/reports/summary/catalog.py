@@ -21,6 +21,7 @@ SUMMARY_GROUP_BY = {
     "row_type",
     "header_key",
 }
+SUMMARY_RAW_VIEWS = {"summary_rows", "summary_search"}
 
 SUMMARY_DEFAULT_METRICS = [
     "summary_sheet_count",

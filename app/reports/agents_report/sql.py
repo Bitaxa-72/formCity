@@ -8,6 +8,8 @@ AGENTS_REPORT_FACTS_TABLE_SQL = """
         snapshot_month,
         snapshot_date,
         'deals' AS source_kind,
+        agent_name,
+        unit_number,
         budget_month,
         NULL AS period_month,
         NULL AS value_kind,
@@ -27,14 +29,16 @@ AGENTS_REPORT_FACTS_TABLE_SQL = """
     FROM agents_report_deals
     UNION ALL
     SELECT
-        project,
-        snapshot_month,
-        snapshot_date,
+        m.project,
+        m.snapshot_month,
+        m.snapshot_date,
         'monthly' AS source_kind,
+        d.agent_name,
+        d.unit_number,
         NULL AS budget_month,
-        period_month,
-        value_kind,
-        period_kind,
+        m.period_month,
+        m.value_kind,
+        m.period_kind,
         0 AS deal_count,
         NULL AS area_sqm,
         NULL AS commission_base_amount,
@@ -46,8 +50,13 @@ AGENTS_REPORT_FACTS_TABLE_SQL = """
         NULL AS ddu_amount,
         NULL AS assignment_amount,
         NULL AS furniture_amount,
-        value AS monthly_value
-    FROM agents_report_monthly_values
+        m.value AS monthly_value
+    FROM agents_report_monthly_values m
+    LEFT JOIN agents_report_deals d
+        ON d.project = m.project
+        AND d.snapshot_date = m.snapshot_date
+        AND d.source_row = m.deal_source_row
+        AND COALESCE(d.source_file, '') = COALESCE(m.source_file, '')
 ) AS agents_report_facts
 """.strip()
 
@@ -56,6 +65,8 @@ AGENTS_REPORT_GROUP_BY_COLUMNS = {
     "period": "period_month",
     "snapshot_month": "snapshot_month",
     "source_kind": "source_kind",
+    "agent": "agent_name",
+    "unit_number": "unit_number",
     "budget_month": "budget_month",
     "period_month": "period_month",
     "payment_period_month": "period_month",
@@ -67,6 +78,10 @@ AGENTS_REPORT_FILTER_COLUMNS = {
     "snapshot_month": "snapshot_month",
     "snapshot_date": "snapshot_date",
     "source_kind": "source_kind",
+    "agent": "agent_name",
+    "agent_contains": "agent_name",
+    "unit_number": "unit_number",
+    "unit_number_contains": "unit_number",
     "budget_month": "budget_month",
     "period_month": "period_month",
     "payment_period_month": "period_month",
@@ -80,6 +95,8 @@ AGENTS_REPORT_DIMENSION_COLUMNS = {
     "month": "snapshot_month",
     "snapshot_month": "snapshot_month",
     "source_kind": "source_kind",
+    "agent": "agent_name",
+    "unit_number": "unit_number",
     "budget_month": "budget_month",
     "payment_period_month": "period_month",
     "value_kind": "value_kind",

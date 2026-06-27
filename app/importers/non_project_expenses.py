@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 from app.core.config import load_settings
 from app.db.database import create_database_tables, get_session_factory
 from app.db.models import NonProjectExpenseFact, NonProjectExpenseSource
-from app.pipeline.sensitive_data import detect_sensitive_kind
 
 
 DEFAULT_SOURCE = Path("..") / "\u043e\u0440\u0438\u0433\u0438\u043d\u0430\u043b\u044b \u0442\u0430\u0431\u043b\u0438\u0446" / "\u043d\u0435 \u043f\u0440\u043e\u0435\u043a\u0442\u043d\u044b\u0435 \u0440\u0430\u0441\u0445\u043e\u0434\u044b"
@@ -136,11 +135,6 @@ def classify_item_kind(fm_category: str | None, item_name: str) -> str:
     return "other"
 
 
-def row_sensitive_kind(*values: Any) -> str | None:
-    text = " ".join(str(value) for value in values if value is not None)
-    return detect_sensitive_kind(text)
-
-
 def parse_non_project_file(path: Path, project: str) -> tuple[NonProjectExpenseSource, list[NonProjectExpenseFact]]:
     workbook = load_workbook(path, data_only=True, read_only=True)
     sheet = workbook.active
@@ -171,7 +165,6 @@ def parse_non_project_file(path: Path, project: str) -> tuple[NonProjectExpenseS
         if not item_name or amount is None:
             continue
 
-        sensitive_kind = row_sensitive_kind(fm_category, item_name, reference_text)
         facts.append(
             NonProjectExpenseFact(
                 project=project,
@@ -187,8 +180,8 @@ def parse_non_project_file(path: Path, project: str) -> tuple[NonProjectExpenseS
                 remaining_amount=remaining_amount,
                 reference_text=reference_text,
                 unit="rub",
-                is_sensitive=sensitive_kind is not None,
-                sensitive_kind=sensitive_kind,
+                is_sensitive=False,
+                sensitive_kind=None,
                 source_sheet=sheet.title,
                 source_row=row_index,
                 source_file=path.name,
