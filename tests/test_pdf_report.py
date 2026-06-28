@@ -17,6 +17,13 @@ def test_format_value_prints_payment_calendar_values() -> None:
     assert format_value("project", "moskovsky") == "Московский"
     assert format_value("article_kind", "payment_total") == "Итого платежи"
     assert format_value("fact", 2520223) == "2 520 223 руб."
+    assert format_value("article", "ИП Иванов И.") == "ИП Иванов И."
+
+
+def test_visible_rows_keeps_payment_calendar_article_name() -> None:
+    rows = visible_rows([{"article": "ИП Иванов И.", "plan": 100}])
+
+    assert rows == [{"article": "ИП Иванов И.", "plan": 100}]
 
 
 def test_visible_rows_keeps_agent_name_for_reports() -> None:

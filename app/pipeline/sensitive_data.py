@@ -20,7 +20,7 @@ SENSITIVE_COLUMNS = {
     "is_sensitive",
 }
 INTERNAL_COLUMNS = {"source_rows", "source_file", "source_sheet", "source_row", "source_col"}
-PUBLIC_AGENT_COLUMNS = {"agent", "agent_name", "agent_contains", "agency_name"}
+PUBLIC_TEXT_COLUMNS = {"agent", "agent_name", "agent_contains", "agency_name", "article"}
 PHONE_RE = re.compile(r"(?<!\d)\+?\d(?:[\s().-]*\d){9,15}(?!\d)")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 DOCUMENT_NUMBER_RE = re.compile(r"(?i)(№\s*)[A-Za-zА-Яа-я0-9/_-]{2,}")
@@ -35,6 +35,10 @@ def is_sensitive_column(column: str) -> bool:
 
 def is_hidden_column(column: str) -> bool:
     return column in INTERNAL_COLUMNS or is_sensitive_column(column)
+
+
+def is_public_text_column(column: str) -> bool:
+    return column in PUBLIC_TEXT_COLUMNS
 
 
 def phone_match_is_financial_number(match: re.Match[str]) -> bool:
@@ -94,7 +98,7 @@ def is_sensitive_row(row: dict[str, Any]) -> bool:
 
 def sanitize_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        key: value if key in PUBLIC_AGENT_COLUMNS else sanitize_value(value)
+        key: value if is_public_text_column(key) else sanitize_value(value)
         for key, value in row.items()
         if not is_hidden_column(key)
     }

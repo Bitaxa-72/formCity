@@ -11,7 +11,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 from app.pipeline.calculation_engine import CalculationResult
 from app.pipeline.result_verifier import ResultVerification
-from app.pipeline.sensitive_data import sanitize_value, visible_columns as sanitized_visible_columns, visible_rows
+from app.pipeline.sensitive_data import is_public_text_column, sanitize_value, visible_columns as sanitized_visible_columns, visible_rows
 
 
 PDF_REPORT_THRESHOLD = 30
@@ -137,7 +137,7 @@ def format_number(value: int | float) -> str:
 
 
 def format_value(column: str, value: Any) -> str:
-    value = sanitize_value(value)
+    value = value if is_public_text_column(column) else sanitize_value(value)
     if value is None:
         return ""
     if column == "project" and isinstance(value, str):
