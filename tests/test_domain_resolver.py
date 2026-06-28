@@ -233,6 +233,19 @@ def test_domain_resolver_normalizes_day_filter_to_month() -> None:
     assert resolution.frame.period.to == "2026-05-31"
 
 
+def test_domain_resolver_normalizes_dotted_day_label_to_month() -> None:
+    session = create_session()
+    add_payment_article(session, "Rent office", 1, period_month=date(2026, 5, 1))
+    session.commit()
+    resolver = DomainResolver(session)
+
+    resolution = resolver.resolve(build_period_label_frame("23.05.2026"))
+
+    assert resolution.valid is True
+    assert resolution.frame.period.from_date == "2026-05-01"
+    assert resolution.frame.period.to == "2026-05-31"
+
+
 def test_domain_resolver_uses_available_year_for_month_label() -> None:
     session = create_session()
     add_payment_article(session, "Rent office", 1, period_month=date(2026, 5, 1))

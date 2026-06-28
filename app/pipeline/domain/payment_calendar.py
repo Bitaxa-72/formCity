@@ -73,6 +73,13 @@ class PaymentCalendarDomainMixin:
             period_data["to"] = period_range[1].isoformat()
             return frame.model_copy(update={"period": QueryPeriod.model_validate(period_data)})
 
+        day_date = parse_day_date_label(frame.period.label)
+        if day_date:
+            period_data = frame.period.model_dump(by_alias=True)
+            period_data["from"] = month_start(day_date).isoformat()
+            period_data["to"] = month_end(day_date).isoformat()
+            return frame.model_copy(update={"period": QueryPeriod.model_validate(period_data)})
+
         month = month_from_label(frame.period.label)
         year = year_from_label(frame.period.label)
         if month and periods:

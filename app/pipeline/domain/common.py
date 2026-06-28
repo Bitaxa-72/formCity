@@ -227,6 +227,28 @@ def parse_iso_date(value: str | None) -> date | None:
         return None
 
 
+def parse_day_date_label(value: str | None) -> date | None:
+    if not value:
+        return None
+    iso_match = re.search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", value)
+    if iso_match:
+        year, month, day = (int(part) for part in iso_match.groups())
+        try:
+            return date(year, month, day)
+        except ValueError:
+            return None
+
+    dotted_match = re.search(r"\b(\d{1,2})[.\-/](\d{1,2})[.\-/](20\d{2})\b", value)
+    if not dotted_match:
+        return None
+
+    day, month, year = (int(part) for part in dotted_match.groups())
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
 def month_start(value: date) -> date:
     return date(value.year, value.month, 1)
 
