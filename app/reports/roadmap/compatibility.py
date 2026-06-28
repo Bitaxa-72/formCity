@@ -20,15 +20,18 @@ ROADMAP_UNSUPPORTED_METRICS = {
     "fact": "факт",
     "deviation": "отклонение",
 }
+ROADMAP_AVAILABLE_OPTIONS_TEXT = (
+    "- этапы\n"
+    "- сроки этапов\n"
+    "- итоговый срок\n"
+    "- внешние этапы: банк или Росреестр\n"
+    "- доступные периоды"
+)
 
 ROADMAP_COMPATIBILITY_MESSAGE_TEMPLATE = (
     'В дорожной карте нет показателя "{metric}".\n\n'
     "Для дорожной карты доступны:\n"
-    "- этапы\n"
-    "- сроки этапов\n"
-    "- итоговый срок\n"
-    "- внешние этапы: банк и Росреестр\n"
-    "- доступные периоды"
+    f"{ROADMAP_AVAILABLE_OPTIONS_TEXT}"
 )
 
 ROADMAP_ALLOWED_GROUP_BY = {"row_order", "step", "parent_step", "action", "external", "total", "period_month"}

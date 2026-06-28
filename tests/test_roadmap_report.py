@@ -82,6 +82,24 @@ def test_roadmap_total_duration_view_filters_total_row() -> None:
     assert frame.group_by == []
 
 
+def test_roadmap_steps_view_clears_total_duration_filter() -> None:
+    frame = apply_report_semantics(
+        build_query_frame(
+            {
+                "last_intent": "data_query",
+                "report_type": "roadmap",
+                "view": "roadmap_steps",
+                "metrics": ["duration_min", "duration_max"],
+                "filters": {"is_total": True},
+            },
+        ),
+    )
+
+    assert "is_total" not in frame.filters
+    assert frame.view == "roadmap_steps"
+    assert frame.group_by == ["row_order", "step", "parent_step", "action", "external", "total"]
+
+
 def test_roadmap_domain_uses_latest_period_when_missing() -> None:
     session = create_session()
     add_roadmap_step(session, date(2026, 3, 1), 1, "March step", step_no=1)

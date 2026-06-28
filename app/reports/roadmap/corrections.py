@@ -7,16 +7,13 @@ from app.pipeline.failed_query import (
     FAILED_QUERY_STATE,
     clear_failed_query_markers,
 )
-from app.reports.roadmap.compatibility import find_roadmap_unsupported_metric
+from app.reports.roadmap.compatibility import ROADMAP_AVAILABLE_OPTIONS_TEXT, find_roadmap_unsupported_metric
 
 
 ROADMAP_REPORT_ALIASES = ("дорожная карта", "дорожной карте", "дорожную карту")
 ROADMAP_ACTION_CLARIFICATION = (
     "Период понял. Уточните, что показать по дорожной карте:\n"
-    "- этапы\n"
-    "- итоговый срок\n"
-    "- внешние этапы: банк или Росреестр\n"
-    "- доступные периоды"
+    f"{ROADMAP_AVAILABLE_OPTIONS_TEXT}"
 )
 
 
