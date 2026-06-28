@@ -43,6 +43,20 @@ def test_payment_calendar_failed_group_by_can_be_corrected_to_projects() -> None
     assert parsed.state_delta.project == "all"
 
 
+def test_payment_calendar_explicit_unsupported_group_by_reaches_compatibility() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "платежный календарь московский план по этажам за май",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "payment_calendar"
+    assert parsed.state_delta.project == "moskovsky"
+    assert parsed.state_delta.period.label == "май"
+    assert parsed.state_delta.metrics == ["plan"]
+    assert parsed.state_delta.group_by == ["floor"]
+
+
 def test_model_failed_metric_can_be_corrected_to_kpi() -> None:
     state, parsed = build_forced_parsed_response(
         {

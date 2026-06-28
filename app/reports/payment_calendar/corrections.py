@@ -10,6 +10,112 @@ from app.pipeline.failed_query import (
 from app.reports.payment_calendar.compatibility import PAYMENT_CALENDAR_UNSUPPORTED_METRIC_ALIASES
 
 
+PAYMENT_CALENDAR_REPORT_MARKERS = ("платежный календар", "платежному календар")
+PAYMENT_CALENDAR_UNSUPPORTED_GROUP_BY_MARKERS = {
+    "floor": ("по этаж", "этажам", "этажи"),
+    "room_type": ("по типам помещ", "типам помещ", "помещениям"),
+    "agent": ("по агент", "агентам"),
+    "bank": ("по банк", "банкам"),
+}
+PAYMENT_CALENDAR_PROJECT_MARKERS = {
+    "moskovsky": ("московск",),
+    "obvodny": ("обводн",),
+    "evgenievsky": ("евгеньевск", "евген",),
+}
+PAYMENT_CALENDAR_MONTHS = (
+    "январь",
+    "января",
+    "февраль",
+    "февраля",
+    "март",
+    "марта",
+    "апрель",
+    "апреля",
+    "май",
+    "мая",
+    "июнь",
+    "июня",
+    "июль",
+    "июля",
+    "август",
+    "августа",
+    "сентябрь",
+    "сентября",
+    "октябрь",
+    "октября",
+    "ноябрь",
+    "ноября",
+    "декабрь",
+    "декабря",
+)
+
+
+def resolve_payment_calendar_project(text: str | None) -> str | None:
+    normalized_text = normalize_search_text(text or "")
+    for project, aliases in PAYMENT_CALENDAR_PROJECT_MARKERS.items():
+        if any(alias in normalized_text for alias in aliases):
+            return project
+    return None
+
+
+def resolve_payment_calendar_period_label(text: str | None) -> str | None:
+    normalized_text = normalize_search_text(text or "")
+    for month in PAYMENT_CALENDAR_MONTHS:
+        if month in normalized_text.split():
+            return month
+    return None
+
+
+def resolve_payment_calendar_metric(text: str | None) -> list[str]:
+    normalized_text = normalize_search_text(text or "")
+    if "факт" in normalized_text:
+        return ["fact"]
+    if "отклон" in normalized_text or "разниц" in normalized_text:
+        return ["deviation"]
+    if "план" in normalized_text:
+        return ["plan"]
+    return ["plan", "fact", "deviation"]
+
+
+def resolve_payment_calendar_unsupported_group_by(text: str | None) -> str | None:
+    normalized_text = normalize_search_text(text or "")
+    for group_by, markers in PAYMENT_CALENDAR_UNSUPPORTED_GROUP_BY_MARKERS.items():
+        if any(marker in normalized_text for marker in markers):
+            return group_by
+    return None
+
+
+def build_unsupported_group_by_request_correction(text: str | None) -> LLMParsedResponse | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+    if not any(marker in normalized_text for marker in PAYMENT_CALENDAR_REPORT_MARKERS):
+        return None
+
+    group_by = resolve_payment_calendar_unsupported_group_by(normalized_text)
+    if group_by is None:
+        return None
+
+    state_delta: dict[str, object] = {
+        "report_type": "payment_calendar",
+        "metrics": resolve_payment_calendar_metric(normalized_text),
+        "group_by": [group_by],
+        "filters": {},
+    }
+    project = resolve_payment_calendar_project(normalized_text)
+    if project:
+        state_delta["project"] = project
+    period_label = resolve_payment_calendar_period_label(normalized_text)
+    if period_label:
+        state_delta["period"] = {"label": period_label}
+
+    return LLMParsedResponse(
+        intent=Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(state_delta),
+        confidence=1,
+    )
+
+
 def resolve_payment_calendar_group_by_correction(text: str | None) -> str | None:
     normalized_text = normalize_search_text(text or "")
     if not normalized_text:

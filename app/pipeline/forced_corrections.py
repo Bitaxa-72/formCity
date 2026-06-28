@@ -14,7 +14,11 @@ from app.reports.model.corrections import (
     build_model_summary_correction,
     build_model_total_area_correction,
 )
-from app.reports.payment_calendar.corrections import build_failed_group_by_correction, build_failed_metric_correction
+from app.reports.payment_calendar.corrections import (
+    build_failed_group_by_correction,
+    build_failed_metric_correction,
+    build_unsupported_group_by_request_correction,
+)
 from app.reports.roadmap.corrections import build_failed_roadmap_correction
 from app.reports.sales_plan_execution.corrections import build_sales_plan_execution_correction
 from app.reports.sales_report.corrections import build_sales_report_correction
@@ -44,6 +48,7 @@ def build_forced_parsed_response(
     model_period_summary_correction = build_model_period_summary_correction(text)
     model_summary_correction = build_model_summary_correction(text)
     failed_model_metric_correction = build_failed_model_metric_correction(current_state, text)
+    unsupported_payment_calendar_group_by_correction = build_unsupported_group_by_request_correction(text)
     failed_group_by_correction = build_failed_group_by_correction(current_state, text)
     failed_metric_correction = build_failed_metric_correction(current_state, text)
     failed_roadmap_correction = build_failed_roadmap_correction(current_state, text)
@@ -76,6 +81,8 @@ def build_forced_parsed_response(
         forced_parsed_response = model_summary_correction
     elif failed_model_metric_correction is not None:
         current_state, forced_parsed_response = failed_model_metric_correction
+    elif unsupported_payment_calendar_group_by_correction is not None:
+        forced_parsed_response = unsupported_payment_calendar_group_by_correction
     elif debt_and_bookings_correction is not None:
         forced_parsed_response = debt_and_bookings_correction
     elif agents_report_context and agents_report_correction is not None:
