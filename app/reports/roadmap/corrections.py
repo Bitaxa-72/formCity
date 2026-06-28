@@ -7,6 +7,17 @@ from app.pipeline.failed_query import (
     FAILED_QUERY_STATE,
     clear_failed_query_markers,
 )
+from app.reports.roadmap.compatibility import find_roadmap_unsupported_metric
+
+
+ROADMAP_REPORT_ALIASES = ("дорожная карта", "дорожной карте", "дорожную карту")
+ROADMAP_ACTION_CLARIFICATION = (
+    "Период понял. Уточните, что показать по дорожной карте:\n"
+    "- этапы\n"
+    "- итоговый срок\n"
+    "- внешние этапы: банк или Росреестр\n"
+    "- доступные периоды"
+)
 
 
 ROADMAP_MONTHS = (
@@ -125,8 +136,8 @@ def build_failed_roadmap_correction(
         if period_label is not None:
             delta_data = {
                 "period": {"label": period_label},
-                "metrics": failed_state.get("metrics") or [],
-                "view": failed_state.get("view"),
+                "metrics": [],
+                "view": None,
                 "filters": failed_state.get("filters") or {},
                 "group_by": failed_state.get("group_by") or [],
             }
@@ -145,6 +156,8 @@ def build_failed_roadmap_correction(
                 LLMParsedResponse(
                     intent=Intent.DATA_QUERY,
                     state_delta=StateDelta.model_validate(delta_data),
+                    needs_clarification=True,
+                    clarification_question=ROADMAP_ACTION_CLARIFICATION,
                     confidence=1,
                 ),
             )
@@ -192,5 +205,29 @@ def build_roadmap_context_correction(
     return LLMParsedResponse(
         intent=Intent.DIMENSION_QUERY if intent == "dimension_query" else Intent.DATA_QUERY,
         state_delta=StateDelta.model_validate(delta_data),
+        confidence=1,
+    )
+
+
+def build_explicit_roadmap_unsupported_metric_correction(text: str | None) -> LLMParsedResponse | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+    if not any(alias in normalized_text for alias in ROADMAP_REPORT_ALIASES):
+        return None
+    if find_roadmap_unsupported_metric(normalized_text) is None:
+        return None
+
+    return LLMParsedResponse(
+        intent=Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(
+            {
+                "report_type": "roadmap",
+                "project": "all",
+                "metrics": ["plan"],
+                "filters": {},
+                "group_by": [],
+            },
+        ),
         confidence=1,
     )

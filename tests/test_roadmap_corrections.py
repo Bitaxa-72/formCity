@@ -2,7 +2,13 @@ from app.pipeline.failed_query import CONTEXT_BLOCKED_AFTER_ERROR, FAILED_QUERY_
 from app.pipeline.query_frame import build_query_frame
 from app.pipeline.report_semantics import apply_report_semantics
 from app.reports.roadmap.compatibility import check_roadmap_compatibility
-from app.reports.roadmap.corrections import build_failed_roadmap_correction, build_roadmap_context_correction, resolve_roadmap_recovery
+from app.reports.roadmap.corrections import (
+    ROADMAP_ACTION_CLARIFICATION,
+    build_explicit_roadmap_unsupported_metric_correction,
+    build_failed_roadmap_correction,
+    build_roadmap_context_correction,
+    resolve_roadmap_recovery,
+)
 
 
 def test_resolve_roadmap_recovery_detects_steps_word() -> None:
@@ -39,6 +45,17 @@ def test_failed_roadmap_metric_keeps_error_after_period_followup() -> None:
     assert state["report_type"] == "roadmap"
     assert state["period"] == {"label": "апрель"}
     assert parsed.state_delta.period.label == "апрель"
+    assert parsed.state_delta.metrics == []
+    assert parsed.needs_clarification is True
+    assert parsed.clarification_question == ROADMAP_ACTION_CLARIFICATION
+
+
+def test_explicit_roadmap_unsupported_metric_reaches_roadmap_compatibility() -> None:
+    parsed = build_explicit_roadmap_unsupported_metric_correction("дорожная карта план по рекламе")
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "roadmap"
+    assert parsed.state_delta.project == "all"
     assert parsed.state_delta.metrics == ["plan"]
 
 
@@ -82,6 +99,22 @@ def test_roadmap_context_steps_followup_switches_from_duration_to_steps() -> Non
     assert parsed.state_delta.metrics == ["duration_min", "duration_max"]
     assert parsed.state_delta.filters == {}
     assert parsed.state_delta.group_by == []
+
+
+def test_roadmap_semantics_keeps_clarification_not_ready() -> None:
+    frame = apply_report_semantics(build_query_frame(
+        {
+            "report_type": "roadmap",
+            "project": "all",
+            "period": {"label": "апрель"},
+            "metrics": [],
+            "awaiting_clarification": True,
+            "clarification_target": ROADMAP_ACTION_CLARIFICATION,
+        },
+    ))
+
+    assert frame.ready is False
+    assert frame.clarification_question == ROADMAP_ACTION_CLARIFICATION
 
 
 def test_roadmap_compatibility_rejects_plan_metric_from_frame() -> None:

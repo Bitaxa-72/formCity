@@ -66,6 +66,7 @@ class QueryFrame(BaseModel):
     group_by: list[str]
     operation: dict[str, Any] | None = None
     notices: list[str] = Field(default_factory=list)
+    awaiting_clarification: bool = False
     ready: bool
     missing_fields: list[str]
     clarification_question: str | None = None
@@ -131,7 +132,9 @@ def build_query_frame(state: dict[str, Any]) -> QueryFrame:
 
     ready = not missing_fields and not prepared.get("awaiting_clarification")
 
-    if intent in {Intent.GENERAL_QUESTION.value, Intent.UNSUPPORTED.value}:
+    if prepared.get("awaiting_clarification") and prepared.get("report_type") and prepared.get("clarification_target"):
+        clarification_question = prepared.get("clarification_target")
+    elif intent in {Intent.GENERAL_QUESTION.value, Intent.UNSUPPORTED.value}:
         clarification_question = NON_DATA_QUERY_MESSAGE
     else:
         clarification_question = build_clarification_question(missing_fields) if missing_fields else prepared.get("clarification_target")
@@ -148,6 +151,7 @@ def build_query_frame(state: dict[str, Any]) -> QueryFrame:
         group_by=prepared.get("group_by") or [],
         operation=operation,
         notices=prepared.get("notices") or [],
+        awaiting_clarification=bool(prepared.get("awaiting_clarification")),
         ready=ready,
         missing_fields=missing_fields,
         clarification_question=clarification_question,

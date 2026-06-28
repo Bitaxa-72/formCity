@@ -8,6 +8,8 @@ ROADMAP_ROW_GROUP_BY = ["row_order", "step", "parent_step", "action", "external"
 def apply_roadmap_view(frame: QueryFrame) -> QueryFrame:
     if frame.report_type != "roadmap":
         return frame
+    if frame.awaiting_clarification:
+        return frame
 
     if frame.intent == "dimension_query":
         return frame.model_copy(

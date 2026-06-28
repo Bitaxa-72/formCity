@@ -19,7 +19,11 @@ from app.reports.payment_calendar.corrections import (
     build_failed_metric_correction,
     build_unsupported_group_by_request_correction,
 )
-from app.reports.roadmap.corrections import build_failed_roadmap_correction, build_roadmap_context_correction
+from app.reports.roadmap.corrections import (
+    build_explicit_roadmap_unsupported_metric_correction,
+    build_failed_roadmap_correction,
+    build_roadmap_context_correction,
+)
 from app.reports.sales_plan_execution.corrections import build_sales_plan_execution_correction
 from app.reports.sales_report.corrections import build_sales_report_correction
 from app.reports.stock_for_sale.corrections import build_stock_for_sale_correction
@@ -51,6 +55,7 @@ def build_forced_parsed_response(
     unsupported_payment_calendar_group_by_correction = build_unsupported_group_by_request_correction(text)
     failed_group_by_correction = build_failed_group_by_correction(current_state, text)
     failed_metric_correction = build_failed_metric_correction(current_state, text)
+    explicit_roadmap_unsupported_metric_correction = build_explicit_roadmap_unsupported_metric_correction(text)
     failed_roadmap_correction = build_failed_roadmap_correction(current_state, text)
     roadmap_context_correction = build_roadmap_context_correction(current_state, text)
     debt_and_bookings_correction = build_debt_and_bookings_correction(text)
@@ -102,6 +107,8 @@ def build_forced_parsed_response(
         current_state, forced_parsed_response = failed_group_by_correction
     elif failed_metric_correction is not None:
         current_state, forced_parsed_response = failed_metric_correction
+    elif explicit_roadmap_unsupported_metric_correction is not None:
+        forced_parsed_response = explicit_roadmap_unsupported_metric_correction
     elif failed_roadmap_correction is not None:
         current_state, forced_parsed_response = failed_roadmap_correction
     elif roadmap_context_correction is not None:
