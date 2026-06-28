@@ -154,6 +154,8 @@ def build_failed_roadmap_correction(
     intent, delta_data = recovery
     corrected_state = dict(failed_state)
     corrected_state.update(delta_data)
+    if intent == "dimension_query" and delta_data.get("dimension") == "period_month":
+        corrected_state["period"] = {"from": None, "to": None, "label": None}
     corrected_state["report_type"] = "roadmap"
     corrected_state["project"] = "all"
     corrected_state["awaiting_clarification"] = False

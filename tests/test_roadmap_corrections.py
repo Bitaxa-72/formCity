@@ -42,6 +42,30 @@ def test_failed_roadmap_metric_keeps_error_after_period_followup() -> None:
     assert parsed.state_delta.metrics == ["plan"]
 
 
+def test_failed_roadmap_periods_followup_clears_failed_period() -> None:
+    state, parsed = build_failed_roadmap_correction(
+        {
+            CONTEXT_BLOCKED_AFTER_ERROR: True,
+            FAILED_QUERY_ERROR: "metric_not_supported_for_roadmap",
+            FAILED_QUERY_STATE: {
+                "report_type": "roadmap",
+                "project": "all",
+                "period": {"label": "апрель"},
+                "metrics": ["plan"],
+                "view": None,
+                "filters": {},
+                "group_by": [],
+            },
+        },
+        "периоды",
+    )
+
+    assert parsed is not None
+    assert state["period"] == {"from": None, "to": None, "label": None}
+    assert parsed.intent == "dimension_query"
+    assert parsed.state_delta.dimension == "period_month"
+
+
 def test_roadmap_compatibility_rejects_plan_metric_from_frame() -> None:
     frame = apply_report_semantics(build_query_frame(
         {
