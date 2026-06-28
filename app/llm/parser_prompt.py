@@ -41,6 +41,7 @@ Report type rules:
 - Use report_type_aliases and report_rules to recognize report_type.
 - If the user clearly names a report type or alias, always set report_type.
 - Do not return null report_type when a clear alias is present.
+- A clearly named report type wins over metric aliases from other reports. Keep the named report_type and let backend compatibility reject unsupported metrics or dimensions.
 
 Context safety rules:
 - Use dialog_state only for valid follow-ups to the same report. A valid follow-up can change period, project, metric, filter, group_by, view, or dimension only when that field exists for the current report_type.
