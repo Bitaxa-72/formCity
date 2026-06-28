@@ -652,6 +652,43 @@ def test_resolve_context_dimension_answer_keeps_dimension_query_intent() -> None
     assert resolved["awaiting_clarification"] is False
 
 
+def test_resolve_context_clarification_answer_with_dimension_becomes_dimension_query() -> None:
+    current_state = {
+        "report_type": "roadmap",
+        "project": "all",
+        "period": {"label": "апрель"},
+        "metrics": [],
+        "awaiting_clarification": True,
+        "clarification_target": "Период понял.",
+        "clarification_base_state": {
+            "report_type": "roadmap",
+            "project": "all",
+            "period": {"label": "апрель"},
+            "metrics": [],
+            "view": None,
+            "filters": {},
+            "group_by": [],
+            "awaiting_clarification": False,
+        },
+    }
+    parsed = LLMParsedResponse.model_validate(
+        {
+            "intent": "clarification_answer",
+            "state_delta": {
+                "dimension": "period_month",
+            },
+            "confidence": 0.9,
+        },
+    )
+
+    resolved = resolve_context(current_state, parsed)
+
+    assert resolved["last_intent"] == "dimension_query"
+    assert resolved["dimension"] == "period_month"
+    assert resolved["metrics"] == []
+    assert resolved["group_by"] == []
+
+
 def test_resolve_context_sets_clarification_state() -> None:
     parsed = LLMParsedResponse.model_validate(
         {

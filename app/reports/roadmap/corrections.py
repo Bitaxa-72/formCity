@@ -139,7 +139,7 @@ def build_failed_roadmap_correction(
                 "metrics": [],
                 "view": None,
                 "filters": failed_state.get("filters") or {},
-                "group_by": failed_state.get("group_by") or [],
+                "group_by": [],
             }
             corrected_state = dict(failed_state)
             corrected_state.update(delta_data)

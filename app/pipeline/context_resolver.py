@@ -355,6 +355,8 @@ def resolve_context(
             effective_intent = Intent.DIMENSION_QUERY
         else:
             effective_intent = Intent.CLARIFICATION_ANSWER
+    elif is_clarification_mode and parsed_response.intent == Intent.CLARIFICATION_ANSWER and parsed_response.state_delta.dimension:
+        effective_intent = Intent.DIMENSION_QUERY
 
     discard_incompatible_report_context = should_discard_incompatible_report_context(
         normalized_current_state,
