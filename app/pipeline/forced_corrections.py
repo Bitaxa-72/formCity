@@ -51,6 +51,7 @@ def build_forced_parsed_response(
     sales_plan_execution_correction = build_sales_plan_execution_correction(text)
     agents_report_correction = build_agents_report_correction(text)
     summary_correction = build_summary_correction(text)
+    agents_report_context = current_state.get("report_type") == "agents_report"
     if model_available_metrics_correction is not None:
         forced_parsed_response = model_available_metrics_correction
     elif model_sensitive_correction is not None:
@@ -73,6 +74,8 @@ def build_forced_parsed_response(
         forced_parsed_response = model_summary_correction
     elif debt_and_bookings_correction is not None:
         forced_parsed_response = debt_and_bookings_correction
+    elif agents_report_context and agents_report_correction is not None:
+        forced_parsed_response = agents_report_correction
     elif stock_for_sale_correction is not None:
         forced_parsed_response = stock_for_sale_correction
     elif sales_report_correction is not None:

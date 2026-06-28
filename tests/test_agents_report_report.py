@@ -308,6 +308,21 @@ def test_agents_correction_extracts_agent_filter_from_metric_query() -> None:
     assert parsed.state_delta.filters == {"agent_contains": "ЦСС"}
 
 
+def test_agents_correction_extracts_agent_filter_from_remaining_query() -> None:
+    parsed = build_agents_report_correction("Славгородский остаток")
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "agents_report"
+    assert parsed.state_delta.metrics == ["agents_remaining_amount"]
+    assert parsed.state_delta.filters == {"agent_contains": "Славгородский"}
+
+
+def test_agents_correction_does_not_capture_stock_report_wording() -> None:
+    parsed = build_agents_report_correction("остатки в продаже")
+
+    assert parsed is None
+
+
 def test_agents_agent_filter_limits_summary() -> None:
     session = create_session()
     add_agents_data(session)

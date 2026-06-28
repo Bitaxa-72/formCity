@@ -5,6 +5,7 @@ from app.llm.parser import LLMParsedResponse, StateDelta
 
 
 AGENT_MARKERS = ("агент", "агентск", "вознагражден")
+AGENT_METRIC_MARKERS = ("остат", "оплач", "сделк", "площад")
 MONTHS = (
     "январь",
     "января",
@@ -43,6 +44,14 @@ AGENT_FILTER_STOP_WORDS = {
     "вознаграждение",
     "вознаграждения",
     "вознагражден",
+    "остаток",
+    "остатки",
+    "остатка",
+    "оплачено",
+    "оплачен",
+    "сделки",
+    "сделок",
+    "площадь",
     "сумма",
     "сколько",
     "покажи",
@@ -57,6 +66,8 @@ AGENT_FILTER_STOP_WORDS = {
     "марта",
     "февраль",
     "февраля",
+    "в",
+    "продаже",
 }
 
 
@@ -68,6 +79,10 @@ def normalize_agents_text(text: str | None) -> str:
 
 def has_agent_marker(normalized_text: str) -> bool:
     return any(marker in normalized_text for marker in AGENT_MARKERS)
+
+
+def has_agent_metric_marker(normalized_text: str) -> bool:
+    return any(marker in normalized_text for marker in AGENT_METRIC_MARKERS)
 
 
 def extract_agents_period_label(text: str | None) -> str | None:
@@ -127,7 +142,8 @@ def agents_response(
 
 def build_agents_report_correction(text: str | None) -> LLMParsedResponse | None:
     normalized_text = normalize_agents_text(text)
-    if not normalized_text or not has_agent_marker(normalized_text):
+    agent_contains = extract_agent_contains(text)
+    if not normalized_text or not (has_agent_marker(normalized_text) or (has_agent_metric_marker(normalized_text) and agent_contains)):
         return None
 
     if any(marker in normalized_text for marker in ("какие срезы", "доступные срезы", "версии отчета")):
@@ -167,7 +183,6 @@ def build_agents_report_correction(text: str | None) -> LLMParsedResponse | None
         metrics.append("agents_remaining_amount")
 
     filters = {}
-    agent_contains = extract_agent_contains(text)
     if agent_contains:
         filters["agent_contains"] = agent_contains
 
