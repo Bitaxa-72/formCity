@@ -30,6 +30,21 @@ DEFAULT_DIALOG_STATE: dict[str, Any] = {
     "clarification_options": [],
 }
 
+MONTH_LABELS_BY_ISO = {
+    "01": "январь",
+    "02": "февраль",
+    "03": "март",
+    "04": "апрель",
+    "05": "май",
+    "06": "июнь",
+    "07": "июль",
+    "08": "август",
+    "09": "сентябрь",
+    "10": "октябрь",
+    "11": "ноябрь",
+    "12": "декабрь",
+}
+
 
 def empty_dialog_state() -> dict[str, Any]:
     return deepcopy(DEFAULT_DIALOG_STATE)
@@ -130,6 +145,29 @@ def prepare_clarification_delta(previous_state: dict[str, Any], delta: StateDelt
         delta_data.pop("period", None)
         return StateDelta.model_validate(delta_data)
     return delta
+
+
+def convert_sales_report_short_month_filter(previous_state: dict[str, Any], delta: StateDelta) -> StateDelta:
+    if previous_state.get("report_type") != "sales_report":
+        return delta
+    if previous_state.get("view") == "sales_monthly":
+        return delta
+
+    data = delta.model_dump(mode="json", by_alias=True, exclude_none=True)
+    if any(key in data for key in ("report_type", "metrics", "view", "dimension", "group_by", "project")):
+        return delta
+
+    filters = data.get("filters")
+    if not isinstance(filters, dict) or set(filters) != {"period_month"}:
+        return delta
+
+    period_month = filters.get("period_month")
+    if not isinstance(period_month, str) or len(period_month) < 7:
+        return delta
+
+    data.pop("filters", None)
+    data["period"] = {"label": MONTH_LABELS_BY_ISO.get(period_month[5:7], period_month)}
+    return StateDelta.model_validate(data)
 
 
 def delta_data(delta: StateDelta) -> dict[str, Any]:
@@ -341,6 +379,7 @@ def resolve_context(
         if is_clarification_mode
         else parsed_response.state_delta
     )
+    state_delta = convert_sales_report_short_month_filter(previous_state, state_delta)
     resolved = apply_state_delta(resolved, state_delta)
     resolved = reconcile_state_tree(
         previous_state,

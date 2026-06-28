@@ -70,3 +70,11 @@ def test_sanitize_text_masks_person_names() -> None:
     assert "Романников" not in sanitized
     assert "Иванов Иван Иванович" not in sanitized
     assert sanitized.count("[скрыто]") == 2
+
+
+def test_sanitize_text_does_not_mask_roadmap_title_like_phrase() -> None:
+    text = 'в системе "Личный Кабинет Застройщика"'
+
+    sanitized = sanitize_text(text)
+
+    assert '"Личный Кабинет Застройщика"' in sanitized

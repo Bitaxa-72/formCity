@@ -31,6 +31,33 @@ MONTHS = (
     "декабрь",
     "декабря",
 )
+AGENT_FILTER_STOP_WORDS = {
+    "отчет",
+    "по",
+    "агентам",
+    "агент",
+    "агенты",
+    "агентское",
+    "агентский",
+    "агентская",
+    "вознаграждение",
+    "вознаграждения",
+    "вознагражден",
+    "сумма",
+    "сколько",
+    "покажи",
+    "дай",
+    "за",
+    "срез",
+    "последний",
+    "актуальный",
+    "апрель",
+    "апреля",
+    "март",
+    "марта",
+    "февраль",
+    "февраля",
+}
 
 
 def normalize_agents_text(text: str | None) -> str:
@@ -50,6 +77,24 @@ def extract_agents_period_label(text: str | None) -> str | None:
     if not match:
         return None
     return " ".join(part for part in match.groups() if part)
+
+
+def format_agent_token(token: str) -> str:
+    if len(token) <= 4:
+        return token.upper()
+    return token[:1].upper() + token[1:]
+
+
+def extract_agent_contains(text: str | None) -> str | None:
+    tokens = [token for token in normalize_agents_text(text).split() if token not in AGENT_FILTER_STOP_WORDS and not token.isdigit()]
+    if not tokens:
+        return None
+
+    legal_forms = {"ооо", "ип", "ао", "пао"}
+    tokens = [token for token in tokens if token not in legal_forms]
+    if not tokens:
+        return None
+    return " ".join(format_agent_token(token) for token in tokens)
 
 
 def agents_response(
@@ -121,4 +166,9 @@ def build_agents_report_correction(text: str | None) -> LLMParsedResponse | None
     if "остат" in normalized_text:
         metrics.append("agents_remaining_amount")
 
-    return agents_response("agents_summary", metrics, text=text)
+    filters = {}
+    agent_contains = extract_agent_contains(text)
+    if agent_contains:
+        filters["agent_contains"] = agent_contains
+
+    return agents_response("agents_summary", metrics, filters=filters, text=text)

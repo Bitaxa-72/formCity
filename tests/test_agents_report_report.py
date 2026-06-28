@@ -297,3 +297,31 @@ def test_agents_correction_recognizes_monthly_report() -> None:
     assert parsed.state_delta.view == "agents_monthly"
     assert parsed.state_delta.metrics == ["agents_monthly_value"]
     assert parsed.state_delta.period.label == "апрель"
+
+
+def test_agents_correction_extracts_agent_filter_from_metric_query() -> None:
+    parsed = build_agents_report_correction("ооо цсс агентское вознаграждение")
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "agents_report"
+    assert parsed.state_delta.metrics == ["agents_commission_amount"]
+    assert parsed.state_delta.filters == {"agent_contains": "ЦСС"}
+
+
+def test_agents_agent_filter_limits_summary() -> None:
+    session = create_session()
+    add_agents_data(session)
+
+    draft, calculation, _query = build_agents_answer(
+        session,
+        {
+            "last_intent": "data_query",
+            "report_type": "agents_report",
+            "view": "agents_summary",
+            "metrics": ["agents_commission_amount"],
+            "filters": {"agent_contains": "Сидоров"},
+        },
+    )
+
+    assert calculation.row_count == 1
+    assert "Агентское вознаграждение: 240 000 руб." in draft.text
