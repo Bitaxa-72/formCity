@@ -341,7 +341,7 @@ def build_ready_answer(response_data: ResponseData) -> AnswerDraft:
     lines.append("")
     if response_data.summary:
         for item in response_data.summary:
-            lines.append(f"{item.label}: {format_number(item.value)}{format_unit(item.unit)}")
+            lines.append(format_metric_line(item.metric, item.value, item.unit))
     elif response_data.table and response_data.table.rows:
         row = response_data.table.rows[0]
         units = response_data.source.get("units") if isinstance(response_data.source.get("units"), dict) else {}
