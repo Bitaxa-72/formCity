@@ -108,6 +108,42 @@ def add_agents_data(session: Session) -> None:
                 source_row=2,
                 source_file="source.xlsx",
             ),
+            AgentsReportDeal(
+                project="obvodny",
+                snapshot_month=date(2026, 4, 1),
+                snapshot_date=date(2026, 4, 30),
+                row_order=3,
+                agent_name="ИП Иванов И.",
+                unit_number="1.3",
+                buyer_name="Покупатель",
+                ddu_number="ДДУ-789",
+                contract_date=date(2026, 3, 3),
+                area_sqm=Decimal("10"),
+                commission_base_amount=Decimal("1000000"),
+                check_qw_amount=Decimal("1000000"),
+                check_gh_amount=Decimal("0"),
+                commission_rate=Decimal("0.03"),
+                commission_amount=Decimal("30000"),
+                act_total_amount=Decimal("30000"),
+                paid_amount=Decimal("0"),
+                remaining_amount=Decimal("30000"),
+                act_info="Акт 99",
+                budget_month=date(2026, 5, 1),
+                ddu_assignment_amount=Decimal("1000000"),
+                ddu_assignment_price_per_sqm=Decimal("100000"),
+                ddu_amount=Decimal("1000000"),
+                ddu_price_per_sqm=Decimal("100000"),
+                assignment_amount=Decimal("0"),
+                assignment_price_per_sqm=Decimal("0"),
+                furniture_amount=Decimal("0"),
+                note=None,
+                unit="rub",
+                is_sensitive=True,
+                sensitive_fields={"agent_name": True, "buyer_name": True, "ddu_number": True, "act_info": True},
+                source_sheet="Агенты",
+                source_row=3,
+                source_file="source.xlsx",
+            ),
         ],
     )
     session.add_all(
@@ -179,10 +215,10 @@ def test_agents_summary_returns_safe_aggregates() -> None:
 
     assert calculation.row_count == 1
     assert "Отчет по агентам" in draft.text
-    assert "Количество сделок: 2" in draft.text
-    assert "Агентское вознаграждение: 540 000 руб." in draft.text
+    assert "Количество сделок: 3" in draft.text
+    assert "Агентское вознаграждение: 570 000 руб." in draft.text
     assert "Оплачено: 340 000 руб." in draft.text
-    assert "Остаток к оплате: 200 000 руб." in draft.text
+    assert "Остаток к оплате: 230 000 руб." in draft.text
     assert "Иванов" not in draft.text
     assert "Петров" not in draft.text
     assert "ДДУ-123" not in draft.text
@@ -203,8 +239,8 @@ def test_agents_ddu_view_returns_safe_amounts() -> None:
     )
 
     assert calculation.row_count == 1
-    assert "ДДУ + уступка: 21 000 000 руб." in draft.text
-    assert "ДДУ: 18 000 000 руб." in draft.text
+    assert "ДДУ + уступка: 22 000 000 руб." in draft.text
+    assert "ДДУ: 19 000 000 руб." in draft.text
     assert "Уступка: 3 000 000 руб." in draft.text
     assert "Меблировка: 900 000 руб." in draft.text
 
@@ -341,3 +377,23 @@ def test_agents_agent_filter_limits_summary() -> None:
     assert calculation.row_count == 1
     assert "Агент: Сидоров Семен" in draft.text
     assert "Агентское вознаграждение: 240 000 руб." in draft.text
+
+
+def test_agents_agent_name_is_not_masked_in_agent_report() -> None:
+    session = create_session()
+    add_agents_data(session)
+
+    draft, calculation, _query = build_agents_answer(
+        session,
+        {
+            "last_intent": "data_query",
+            "report_type": "agents_report",
+            "view": "agents_summary",
+            "metrics": ["agents_remaining_amount"],
+            "filters": {"agent_contains": "Иванов"},
+        },
+    )
+
+    assert calculation.row_count == 2
+    assert "Агент: ИП Иванов И." in draft.text
+    assert "[скрыто]" not in draft.text

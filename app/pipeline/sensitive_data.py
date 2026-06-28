@@ -93,7 +93,7 @@ def is_sensitive_row(row: dict[str, Any]) -> bool:
 
 def sanitize_row(row: dict[str, Any]) -> dict[str, Any]:
     return {
-        key: sanitize_value(value)
+        key: value if key == "agent" else sanitize_value(value)
         for key, value in row.items()
         if not is_hidden_column(key)
     }
