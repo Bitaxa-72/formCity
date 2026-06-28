@@ -726,7 +726,7 @@ def test_resolve_context_discards_report_when_partial_query_has_incompatible_key
     }
     parsed = LLMParsedResponse.model_validate(
         {
-            "intent": "data_query",
+            "intent": "clarification_answer",
             "state_delta": {
                 "period": {"from": "2026-05-01", "to": "2026-05-31", "label": "май 2026"},
                 "metrics": ["fact"],

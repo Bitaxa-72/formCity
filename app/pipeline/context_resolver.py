@@ -200,7 +200,7 @@ def should_discard_incompatible_report_context(
     parsed_response: LLMParsedResponse,
     is_clarification_mode: bool,
 ) -> bool:
-    if parsed_response.intent not in {Intent.DATA_QUERY, Intent.DIMENSION_QUERY, Intent.CONTEXT_QUERY}:
+    if parsed_response.intent not in {Intent.DATA_QUERY, Intent.DIMENSION_QUERY, Intent.CONTEXT_QUERY, Intent.CLARIFICATION_ANSWER}:
         return False
     if delta_has_report_type(parsed_response.state_delta):
         return False
