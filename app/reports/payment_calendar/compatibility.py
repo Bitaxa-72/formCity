@@ -21,18 +21,20 @@ PAYMENT_CALENDAR_UNSUPPORTED_METRIC_ALIASES = {
     "roe": "ROE",
     "llcr": "LLCR",
 }
-PAYMENT_CALENDAR_UNSUPPORTED_METRIC_REPORT_HINTS = {
-    "выручка": "модель, отчет о продажах, исполнение плана продаж, сводный отчет",
-    "продажи": "отчет о продажах, исполнение плана продаж, сводный отчет",
-    "количество сделок": "отчет о продажах, отчет по агентам, исполнение плана продаж",
-    "цена метра": "остатки в продаже, отчет о продажах, исполнение плана продаж",
-    "средняя цена": "остатки в продаже, отчет о продажах, исполнение плана продаж",
-    "квадратные метры": "модель, остатки в продаже, отчет о продажах, исполнение плана продаж",
-    "площадь": "модель, остатки в продаже, отчет о продажах, исполнение плана продаж",
-    "NPV": "модель",
-    "ROE": "модель",
-    "LLCR": "модель",
-}
+AVAILABLE_REPORTS_MESSAGE = (
+    "Если нужен другой отчет, сформулируйте новый запрос полностью.\n\n"
+    "Доступные отчеты:\n"
+    "- платежный календарь\n"
+    "- дорожная карта\n"
+    "- модель\n"
+    "- непроектные расходы\n"
+    "- остатки в продаже\n"
+    "- отчет о продажах\n"
+    "- исполнение плана продаж\n"
+    "- отчет по агентам\n"
+    "- ДЗ и брони\n"
+    "- сводный отчет"
+)
 
 PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE = (
     'В платежном календаре нет показателя "{metric}".\n\n'
@@ -71,12 +73,7 @@ PAYMENT_CALENDAR_GROUP_BY_COMPATIBILITY_MESSAGE_TEMPLATE = (
 
 def build_payment_calendar_compatibility_message(metric: str) -> str:
     message = PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE.format(metric=metric)
-    report_hint = PAYMENT_CALENDAR_UNSUPPORTED_METRIC_REPORT_HINTS.get(metric)
-    if report_hint:
-        message += f"\n\nВозможно, показатель относится к другому отчету: {report_hint}."
-    else:
-        message += "\n\nЕсли нужен другой отчет, укажите его название."
-    return message
+    return f"{message}\n\n{AVAILABLE_REPORTS_MESSAGE}"
 
 
 def find_payment_calendar_unsupported_metric(text: str | None) -> str | None:
