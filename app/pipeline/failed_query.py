@@ -33,3 +33,13 @@ def clear_failed_query_markers(state: dict[str, object]) -> dict[str, object]:
     cleaned.pop(FAILED_QUERY_ERROR, None)
     cleaned.pop(FAILED_QUERY_STATE, None)
     return cleaned
+
+
+def build_failed_query_state(
+    current_state: dict[str, object],
+    resolved_state: dict[str, object],
+    error: str | None,
+) -> dict[str, object]:
+    if error == "metric_not_supported_for_payment_calendar":
+        return clear_failed_query_markers(dict(current_state))
+    return clear_failed_query_markers(dict(resolved_state))

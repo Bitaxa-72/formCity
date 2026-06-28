@@ -2,6 +2,12 @@ import re
 
 from app.llm.dictionary import Intent
 from app.llm.parser import LLMParsedResponse, StateDelta
+from app.pipeline.failed_query import (
+    CONTEXT_BLOCKED_AFTER_ERROR,
+    FAILED_QUERY_ERROR,
+    FAILED_QUERY_STATE,
+    clear_failed_query_markers,
+)
 
 
 MODEL_SUMMARY_MARKERS = (
@@ -574,4 +580,54 @@ def build_model_snapshot_correction(text: str | None) -> LLMParsedResponse | Non
             },
         ),
         confidence=1,
+    )
+
+
+def build_failed_model_metric_correction(
+    state: dict[str, object] | None,
+    text: str | None,
+) -> tuple[dict[str, object], LLMParsedResponse] | None:
+    if not state or state.get(CONTEXT_BLOCKED_AFTER_ERROR) is not True:
+        return None
+    if state.get(FAILED_QUERY_ERROR) not in {"metric_not_supported_for_model", "unknown_metric_for_model"}:
+        return None
+
+    failed_state = state.get(FAILED_QUERY_STATE)
+    if not isinstance(failed_state, dict) or failed_state.get("report_type") != "model":
+        return None
+
+    metrics = find_model_metric_keys(text)
+    if not metrics:
+        return None
+
+    corrected_state = dict(failed_state)
+    corrected_state["view"] = "model_kpi"
+    corrected_state["metrics"] = metrics
+    corrected_state["filters"] = {}
+    corrected_state["group_by"] = []
+    corrected_state["awaiting_clarification"] = False
+    corrected_state["clarification_target"] = None
+    corrected_state["clarification_base_state"] = None
+    corrected_state["clarification_kind"] = None
+    corrected_state["clarification_options"] = []
+    corrected_state = clear_failed_query_markers(corrected_state)
+
+    delta_data: dict[str, object] = {
+        "report_type": "model",
+        "view": "model_kpi",
+        "metrics": metrics,
+        "filters": {},
+        "group_by": [],
+    }
+    period = corrected_state.get("period")
+    if isinstance(period, dict):
+        delta_data["period"] = period
+
+    return (
+        corrected_state,
+        LLMParsedResponse(
+            intent=Intent.DATA_QUERY,
+            state_delta=StateDelta.model_validate(delta_data),
+            confidence=1,
+        ),
     )

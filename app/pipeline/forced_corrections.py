@@ -4,6 +4,7 @@ from app.reports.debt_and_bookings.corrections import build_debt_and_bookings_co
 from app.reports.model.corrections import (
     build_model_available_metrics_correction,
     build_model_comparison_correction,
+    build_failed_model_metric_correction,
     build_model_metric_correction,
     build_model_period_summary_correction,
     build_model_raw_rows_correction,
@@ -42,6 +43,7 @@ def build_forced_parsed_response(
     model_comparison_correction = build_model_comparison_correction(text)
     model_period_summary_correction = build_model_period_summary_correction(text)
     model_summary_correction = build_model_summary_correction(text)
+    failed_model_metric_correction = build_failed_model_metric_correction(current_state, text)
     failed_group_by_correction = build_failed_group_by_correction(current_state, text)
     failed_metric_correction = build_failed_metric_correction(current_state, text)
     failed_roadmap_correction = build_failed_roadmap_correction(current_state, text)
@@ -72,6 +74,8 @@ def build_forced_parsed_response(
         forced_parsed_response = model_period_summary_correction
     elif model_summary_correction is not None:
         forced_parsed_response = model_summary_correction
+    elif failed_model_metric_correction is not None:
+        current_state, forced_parsed_response = failed_model_metric_correction
     elif debt_and_bookings_correction is not None:
         forced_parsed_response = debt_and_bookings_correction
     elif agents_report_context and agents_report_correction is not None:

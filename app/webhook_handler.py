@@ -31,6 +31,7 @@ from app.pipeline.failed_query import (
     FAILED_QUERY_ERROR,
     FAILED_QUERY_STATE,
     block_short_followup_after_error,
+    build_failed_query_state,
 )
 from app.pipeline.forced_corrections import build_forced_parsed_response
 from app.pipeline.guarded_requests import detect_guarded_non_data_request
@@ -548,7 +549,9 @@ async def process_telegram_webhook(
         state_to_save = preserve_admin_debug_flag(current_state, dict(current_state))
         state_to_save[CONTEXT_BLOCKED_AFTER_ERROR] = True
         state_to_save[FAILED_QUERY_ERROR] = compatibility_check.error
-        state_to_save[FAILED_QUERY_STATE] = jsonable_encoder(resolved_state)
+        state_to_save[FAILED_QUERY_STATE] = jsonable_encoder(
+            build_failed_query_state(current_state, resolved_state, compatibility_check.error),
+        )
         state_to_save["last_trace"] = jsonable_encoder(
             {
                 "request_id": request_id,
