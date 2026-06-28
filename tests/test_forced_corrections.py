@@ -85,6 +85,21 @@ def test_payment_calendar_explicit_balance_start_takes_priority_over_stock() -> 
     assert parsed.state_delta.view == "balance_start"
 
 
+def test_payment_calendar_ambiguous_balance_returns_start_and_end() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "платежный календарь московский остаток за май",
+    )
+
+    assert parsed is not None
+    assert parsed.needs_clarification is False
+    assert parsed.state_delta.report_type == "payment_calendar"
+    assert parsed.state_delta.project == "moskovsky"
+    assert parsed.state_delta.period.label == "май"
+    assert parsed.state_delta.filters == {"article_kind": ["balance_start", "balance_end"]}
+    assert parsed.state_delta.group_by == ["article_kind"]
+
+
 def test_payment_calendar_explicit_article_view_keeps_requested_period() -> None:
     _state, parsed = build_forced_parsed_response(
         {

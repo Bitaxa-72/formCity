@@ -183,11 +183,21 @@ def build_payment_calendar_view_correction(
     correction = resolve_payment_calendar_metric_or_view_correction(normalized_text)
     if correction is None:
         if "остат" in normalized_text and (has_report_marker or payment_calendar_context):
+            state_delta: dict[str, object] = {
+                "report_type": "payment_calendar",
+                "metrics": ["plan", "fact", "deviation"],
+                "filters": {"article_kind": ["balance_start", "balance_end"]},
+                "group_by": ["article_kind"],
+            }
+            project = resolve_payment_calendar_project(normalized_text)
+            if project:
+                state_delta["project"] = project
+            period_label = resolve_payment_calendar_period_label(normalized_text)
+            if period_label:
+                state_delta["period"] = {"label": period_label}
             return LLMParsedResponse(
                 intent=Intent.DATA_QUERY,
-                state_delta=StateDelta.model_validate({"report_type": "payment_calendar"}),
-                needs_clarification=True,
-                clarification_question="Уточните, какой остаток показать в платежном календаре: на начало или на конец периода.",
+                state_delta=StateDelta.model_validate(state_delta),
                 confidence=1,
             )
         return None
