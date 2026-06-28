@@ -13,10 +13,25 @@ PAYMENT_CALENDAR_UNSUPPORTED_METRIC_ALIASES = {
     "цена метра": "цена метра",
     "цена квадратного метра": "цена метра",
     "средняя цена": "средняя цена",
-    "квадраты": "площадь",
+    "квадраты": "квадратные метры",
     "площадь": "площадь",
-    "метры": "площадь",
-    "квадратные метры": "площадь",
+    "метры": "квадратные метры",
+    "квадратные метры": "квадратные метры",
+    "npv": "NPV",
+    "roe": "ROE",
+    "llcr": "LLCR",
+}
+PAYMENT_CALENDAR_UNSUPPORTED_METRIC_REPORT_HINTS = {
+    "выручка": "модель, отчет о продажах, исполнение плана продаж, сводный отчет",
+    "продажи": "отчет о продажах, исполнение плана продаж, сводный отчет",
+    "количество сделок": "отчет о продажах, отчет по агентам, исполнение плана продаж",
+    "цена метра": "остатки в продаже, отчет о продажах, исполнение плана продаж",
+    "средняя цена": "остатки в продаже, отчет о продажах, исполнение плана продаж",
+    "квадратные метры": "модель, остатки в продаже, отчет о продажах, исполнение плана продаж",
+    "площадь": "модель, остатки в продаже, отчет о продажах, исполнение плана продаж",
+    "NPV": "модель",
+    "ROE": "модель",
+    "LLCR": "модель",
 }
 
 PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE = (
@@ -54,6 +69,16 @@ PAYMENT_CALENDAR_GROUP_BY_COMPATIBILITY_MESSAGE_TEMPLATE = (
 )
 
 
+def build_payment_calendar_compatibility_message(metric: str) -> str:
+    message = PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE.format(metric=metric)
+    report_hint = PAYMENT_CALENDAR_UNSUPPORTED_METRIC_REPORT_HINTS.get(metric)
+    if report_hint:
+        message += f"\n\nВозможно, показатель относится к другому отчету: {report_hint}."
+    else:
+        message += "\n\nЕсли нужен другой отчет, укажите его название."
+    return message
+
+
 def find_payment_calendar_unsupported_metric(text: str | None) -> str | None:
     normalized = normalize_search_text(text or "")
     if not normalized:
@@ -88,5 +113,5 @@ def check_payment_calendar_compatibility(frame: QueryFrame, user_text: str | Non
     return CompatibilityCheck(
         valid=False,
         error="metric_not_supported_for_payment_calendar",
-        message=PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE.format(metric=unsupported_metric),
+        message=build_payment_calendar_compatibility_message(unsupported_metric),
     )

@@ -44,8 +44,8 @@ from app.pipeline.metric_resolver import REPORT_NOT_CONNECTED_MESSAGE
 from app.pipeline.guarded_requests import DATA_MUTATION_BLOCK_MESSAGE, OUT_OF_SCOPE_BLOCK_MESSAGE
 from app.pipeline.query_frame import DIMENSION_CLARIFICATION, NON_DATA_QUERY_MESSAGE
 from app.pipeline.report_compatibility import (
-    PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE,
     PAYMENT_CALENDAR_GROUP_BY_COMPATIBILITY_MESSAGE_TEMPLATE,
+    build_payment_calendar_compatibility_message,
 )
 
 
@@ -1547,7 +1547,7 @@ def test_telegram_webhook_rejects_payment_calendar_sales_metric_before_domain_re
     )
 
     body = response.json()
-    expected_text = PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE.format(metric="выручка")
+    expected_text = build_payment_calendar_compatibility_message("выручка")
 
     assert response.status_code == 200
     assert body["compatibility_valid"] is False
@@ -1590,7 +1590,7 @@ def test_telegram_webhook_rejects_payment_calendar_sales_metric_before_metric_cl
     )
 
     body = response.json()
-    expected_text = PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE.format(metric="цена метра")
+    expected_text = build_payment_calendar_compatibility_message("цена метра")
 
     assert response.status_code == 200
     assert body["compatibility_valid"] is False

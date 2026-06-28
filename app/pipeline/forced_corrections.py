@@ -19,6 +19,7 @@ from app.reports.payment_calendar.corrections import (
     build_failed_metric_correction,
     build_payment_calendar_view_correction,
     build_unsupported_group_by_request_correction,
+    build_unsupported_metric_request_correction,
 )
 from app.reports.roadmap.corrections import (
     build_explicit_roadmap_unsupported_metric_correction,
@@ -53,6 +54,7 @@ def build_forced_parsed_response(
     model_period_summary_correction = build_model_period_summary_correction(text)
     model_summary_correction = build_model_summary_correction(text)
     failed_model_metric_correction = build_failed_model_metric_correction(current_state, text)
+    unsupported_payment_calendar_metric_correction = build_unsupported_metric_request_correction(text)
     unsupported_payment_calendar_group_by_correction = build_unsupported_group_by_request_correction(text)
     payment_calendar_context = current_state.get("report_type") == "payment_calendar" and current_state.get("awaiting_clarification") is not True
     payment_calendar_view_correction = build_payment_calendar_view_correction(
@@ -83,6 +85,8 @@ def build_forced_parsed_response(
         forced_parsed_response = model_snapshot_correction
     elif model_total_area_correction is not None:
         forced_parsed_response = model_total_area_correction
+    elif unsupported_payment_calendar_metric_correction is not None:
+        forced_parsed_response = unsupported_payment_calendar_metric_correction
     elif model_metric_correction is not None:
         forced_parsed_response = model_metric_correction
     elif model_comparison_correction is not None:

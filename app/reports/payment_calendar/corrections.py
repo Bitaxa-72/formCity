@@ -7,7 +7,10 @@ from app.pipeline.failed_query import (
     FAILED_QUERY_STATE,
     clear_failed_query_markers,
 )
-from app.reports.payment_calendar.compatibility import PAYMENT_CALENDAR_UNSUPPORTED_METRIC_ALIASES
+from app.reports.payment_calendar.compatibility import (
+    PAYMENT_CALENDAR_UNSUPPORTED_METRIC_ALIASES,
+    find_payment_calendar_unsupported_metric,
+)
 
 
 PAYMENT_CALENDAR_REPORT_MARKERS = ("платежный календар", "платежному календар", "платежном календар")
@@ -104,6 +107,37 @@ def build_unsupported_group_by_request_correction(text: str | None) -> LLMParsed
         "metrics": resolve_payment_calendar_metric(normalized_text),
         "group_by": [group_by],
         "filters": {},
+    }
+    project = resolve_payment_calendar_project(normalized_text)
+    if project:
+        state_delta["project"] = project
+    period_label = resolve_payment_calendar_period_label(normalized_text)
+    if period_label:
+        state_delta["period"] = {"label": period_label}
+
+    return LLMParsedResponse(
+        intent=Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(state_delta),
+        confidence=1,
+    )
+
+
+def build_unsupported_metric_request_correction(text: str | None) -> LLMParsedResponse | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+    if not any(marker in normalized_text for marker in PAYMENT_CALENDAR_REPORT_MARKERS):
+        return None
+
+    unsupported_metric = find_payment_calendar_unsupported_metric(normalized_text)
+    if unsupported_metric is None:
+        return None
+
+    state_delta: dict[str, object] = {
+        "report_type": "payment_calendar",
+        "metrics": resolve_payment_calendar_metric(normalized_text),
+        "filters": {"article": unsupported_metric},
+        "group_by": [],
     }
     project = resolve_payment_calendar_project(normalized_text)
     if project:

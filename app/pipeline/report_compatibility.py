@@ -8,6 +8,7 @@ from app.reports.payment_calendar.compatibility import (
     PAYMENT_CALENDAR_COMPATIBILITY_MESSAGE_TEMPLATE,
     PAYMENT_CALENDAR_GROUP_BY_COMPATIBILITY_MESSAGE_TEMPLATE,
     PAYMENT_CALENDAR_UNSUPPORTED_METRIC_ALIASES,
+    build_payment_calendar_compatibility_message,
     check_payment_calendar_compatibility,
 )
 from app.reports.roadmap.compatibility import check_roadmap_compatibility

@@ -57,6 +57,52 @@ def test_payment_calendar_explicit_unsupported_group_by_reaches_compatibility() 
     assert parsed.state_delta.group_by == ["floor"]
 
 
+def test_payment_calendar_explicit_unsupported_metric_stays_in_payment_calendar() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "платежный календарь NPV апрель",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "payment_calendar"
+    assert parsed.state_delta.period.label == "апрель"
+    assert parsed.state_delta.filters == {"article": "NPV"}
+
+
+def test_payment_calendar_explicit_sales_metric_stays_in_payment_calendar() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "платежный календарь московский сделки за май",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "payment_calendar"
+    assert parsed.state_delta.project == "moskovsky"
+    assert parsed.state_delta.period.label == "май"
+    assert parsed.state_delta.filters == {"article": "количество сделок"}
+
+
+def test_model_npv_still_routes_to_model_without_payment_calendar_marker() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "модель NPV апрель",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "model"
+    assert parsed.state_delta.metrics == ["model_npv"]
+
+
+def test_agents_deals_still_route_to_agents_report_without_payment_calendar_marker() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "отчет по агентам сделки апрель",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "agents_report"
+
+
 def test_payment_calendar_context_takes_priority_over_stock_for_balance_end() -> None:
     _state, parsed = build_forced_parsed_response(
         {
@@ -176,6 +222,8 @@ def test_payment_calendar_unsupported_metric_keeps_previous_successful_context()
     )
 
     assert failed_state["filters"] == {"article": "ФОТ + налоги (ФОТ)"}
+    assert failed_state["project"] == "moskovsky"
+    assert failed_state["period"] == {"from": "2026-05-01", "to": "2026-05-31", "label": "май 2026"}
 
 
 def test_payment_calendar_failed_metric_correction_uses_saved_successful_article() -> None:
@@ -198,3 +246,27 @@ def test_payment_calendar_failed_metric_correction_uses_saved_successful_article
     assert parsed is not None
     assert state["filters"] == {"article": "ФОТ + налоги (ФОТ)"}
     assert parsed.state_delta.metrics == ["fact"]
+
+
+def test_payment_calendar_failed_metric_correction_keeps_failed_project_and_period_for_view() -> None:
+    state, parsed = build_forced_parsed_response(
+        {
+            CONTEXT_BLOCKED_AFTER_ERROR: True,
+            FAILED_QUERY_ERROR: "metric_not_supported_for_payment_calendar",
+            FAILED_QUERY_STATE: {
+                "report_type": "payment_calendar",
+                "project": "moskovsky",
+                "period": {"from": "2026-05-01", "to": "2026-05-31", "label": "май 2026"},
+                "metrics": ["plan", "fact", "deviation"],
+                "filters": {},
+                "group_by": [],
+            },
+        },
+        "поступления",
+    )
+
+    assert parsed is not None
+    assert state["project"] == "moskovsky"
+    assert state["period"] == {"from": "2026-05-01", "to": "2026-05-31", "label": "май 2026"}
+    assert parsed.state_delta.view == "income"
+    assert parsed.state_delta.filters == {}
