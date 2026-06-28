@@ -15,6 +15,7 @@ from app.reports.model.corrections import (
     build_model_total_area_correction,
 )
 from app.reports.payment_calendar.corrections import (
+    build_article_filter_request_correction,
     build_failed_group_by_correction,
     build_failed_metric_correction,
     build_payment_calendar_view_correction,
@@ -57,6 +58,10 @@ def build_forced_parsed_response(
     unsupported_payment_calendar_metric_correction = build_unsupported_metric_request_correction(text)
     unsupported_payment_calendar_group_by_correction = build_unsupported_group_by_request_correction(text)
     payment_calendar_context = current_state.get("report_type") == "payment_calendar" and current_state.get("awaiting_clarification") is not True
+    payment_calendar_article_filter_correction = build_article_filter_request_correction(
+        text,
+        payment_calendar_context=payment_calendar_context,
+    )
     payment_calendar_view_correction = build_payment_calendar_view_correction(
         text,
         payment_calendar_context=payment_calendar_context,
@@ -99,6 +104,8 @@ def build_forced_parsed_response(
         current_state, forced_parsed_response = failed_model_metric_correction
     elif unsupported_payment_calendar_group_by_correction is not None:
         forced_parsed_response = unsupported_payment_calendar_group_by_correction
+    elif payment_calendar_article_filter_correction is not None:
+        forced_parsed_response = payment_calendar_article_filter_correction
     elif payment_calendar_view_correction is not None:
         forced_parsed_response = payment_calendar_view_correction
     elif debt_and_bookings_correction is not None:

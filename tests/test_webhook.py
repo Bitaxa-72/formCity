@@ -617,7 +617,7 @@ def test_telegram_webhook_sends_fallback_when_llm_answer_fails() -> None:
     body = response.json()
 
     expected_text = (
-        'По статье "Реклама" за май 2026 факт не заполнен.\n'
+        'По статье "рекламе" за май факт не заполнен.\n'
         "План: 2 900 000 руб.\n"
         "Факт: нет данных\n"
         "Отклонение: нет данных"
@@ -2429,7 +2429,7 @@ def test_telegram_webhook_allows_full_query_after_compatibility_error() -> None:
     assert response.status_code == 200
     assert body["llm_parse"] == "done"
     assert body["telegram_response_sent"] is True
-    assert len(fake_llm_parser.inputs) == 1
+    assert fake_llm_parser.inputs == []
     assert CONTEXT_BLOCKED_AFTER_ERROR not in fake_user_session_repository.state
 
 

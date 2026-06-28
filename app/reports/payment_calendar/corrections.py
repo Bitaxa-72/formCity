@@ -1,3 +1,5 @@
+import re
+
 from app.llm.dictionary import Intent
 from app.llm.parser import LLMParsedResponse, StateDelta
 from app.pipeline.domain_resolver import normalize_search_text
@@ -20,6 +22,26 @@ PAYMENT_CALENDAR_UNSUPPORTED_GROUP_BY_MARKERS = {
     "agent": ("по агент", "агентам"),
     "bank": ("по банк", "банкам"),
 }
+PAYMENT_CALENDAR_GROUP_BY_ARTICLE_EXCLUSIONS = (
+    "проект",
+    "проектам",
+    "период",
+    "периодам",
+    "месяц",
+    "месяцам",
+    "статьям",
+    "всем стать",
+    "раздел",
+    "разделам",
+    "этаж",
+    "этажам",
+    "типам помещ",
+    "помещениям",
+    "агент",
+    "агентам",
+    "банк",
+    "банкам",
+)
 PAYMENT_CALENDAR_PROJECT_MARKERS = {
     "moskovsky": ("московск",),
     "obvodny": ("обводн",),
@@ -83,12 +105,73 @@ def resolve_payment_calendar_metric(text: str | None) -> list[str]:
     return ["plan", "fact", "deviation"]
 
 
+def has_payment_calendar_metric_marker(text: str | None) -> bool:
+    normalized_text = normalize_search_text(text or "")
+    return any(marker in normalized_text for marker in ("план", "факт", "отклон", "разниц"))
+
+
 def resolve_payment_calendar_unsupported_group_by(text: str | None) -> str | None:
     normalized_text = normalize_search_text(text or "")
     for group_by, markers in PAYMENT_CALENDAR_UNSUPPORTED_GROUP_BY_MARKERS.items():
         if any(marker in normalized_text for marker in markers):
             return group_by
     return None
+
+
+def extract_payment_calendar_article_filter(text: str | None) -> str | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+
+    for match in re.finditer(r"(?:^|\s)по\s+(.+?)(?=\s+за\s+|\s+с\s+|\s+на\s+|$)", normalized_text):
+        candidate = match.group(1).strip(" ,.;:")
+        if not candidate:
+            continue
+        if any(candidate == marker or candidate.startswith(f"{marker} ") for marker in PAYMENT_CALENDAR_GROUP_BY_ARTICLE_EXCLUSIONS):
+            continue
+        return candidate
+    return None
+
+
+def build_article_filter_request_correction(
+    text: str | None,
+    *,
+    payment_calendar_context: bool = False,
+) -> LLMParsedResponse | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+
+    has_report_marker = any(marker in normalized_text for marker in PAYMENT_CALENDAR_REPORT_MARKERS)
+    if not has_report_marker and not payment_calendar_context:
+        return None
+
+    if not has_payment_calendar_metric_marker(normalized_text):
+        return None
+
+    metrics = resolve_payment_calendar_metric(normalized_text)
+    article = extract_payment_calendar_article_filter(normalized_text)
+    if article is None:
+        return None
+
+    state_delta: dict[str, object] = {
+        "report_type": "payment_calendar",
+        "metrics": metrics,
+        "filters": {"article": article},
+        "group_by": [],
+    }
+    project = resolve_payment_calendar_project(normalized_text)
+    if project:
+        state_delta["project"] = project
+    period_label = resolve_payment_calendar_period_label(normalized_text)
+    if period_label:
+        state_delta["period"] = {"label": period_label}
+
+    return LLMParsedResponse(
+        intent=Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(state_delta),
+        confidence=1,
+    )
 
 
 def build_unsupported_group_by_request_correction(text: str | None) -> LLMParsedResponse | None:

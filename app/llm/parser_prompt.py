@@ -69,6 +69,7 @@ Payment calendar view rules:
 - For payment_calendar views, also set metrics=["plan","fact","deviation"] unless the user explicitly asks only one metric.
 - Do not use filters.article_kind for these views; backend applies report view rules.
 - If the user names a concrete article like "реклама" or "ФОТ", use filters.article and do not set view.
+- For payment_calendar, phrases "plan/fact/deviation по <text>" mean filters.article="<text>" unless <text> is an explicit grouping dimension: projects, periods, articles, or sections.
 
 Filter rules:
 - filters are used when the user limits the request to a concrete entity or category.

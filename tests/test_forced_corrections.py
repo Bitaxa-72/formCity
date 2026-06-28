@@ -57,6 +57,46 @@ def test_payment_calendar_explicit_unsupported_group_by_reaches_compatibility() 
     assert parsed.state_delta.group_by == ["floor"]
 
 
+def test_payment_calendar_metric_by_text_becomes_article_filter() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "платежный календарь московский план по ФОТ за май",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "payment_calendar"
+    assert parsed.state_delta.project == "moskovsky"
+    assert parsed.state_delta.period.label == "май"
+    assert parsed.state_delta.metrics == ["plan"]
+    assert parsed.state_delta.filters == {"article": "фот"}
+    assert parsed.state_delta.group_by == []
+
+
+def test_payment_calendar_all_metrics_by_text_becomes_article_filter() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "платежный календарь московский план факт отклонение по рекламе за май",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "payment_calendar"
+    assert parsed.state_delta.metrics == ["plan", "fact", "deviation"]
+    assert parsed.state_delta.filters == {"article": "рекламе"}
+    assert parsed.state_delta.group_by == []
+
+
+def test_payment_calendar_unknown_by_text_still_becomes_article_filter_for_domain_validation() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "платежный календарь московский план по космическая статья 123 за май",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "payment_calendar"
+    assert parsed.state_delta.filters == {"article": "космическая статья 123"}
+    assert parsed.state_delta.group_by == []
+
+
 def test_payment_calendar_explicit_unsupported_metric_stays_in_payment_calendar() -> None:
     _state, parsed = build_forced_parsed_response(
         {},
