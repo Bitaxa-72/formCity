@@ -154,7 +154,7 @@ def ambiguous_message(values: dict[str, float]) -> str:
 def detect_arithmetic_operation(text: str) -> str | None:
     normalized = normalize_search_text(text)
     words = normalized.split()
-    if any(word.startswith(("подел", "раздел")) or word in {"дели", "пополам"} for word in words):
+    if any(word.startswith(("подел", "раздели")) or word in {"дели", "пополам"} for word in words):
         return "divide"
     if any(word.startswith("умнож") for word in words):
         return "multiply"

@@ -1,4 +1,5 @@
 from app.pipeline.pdf_report import column_label, format_value, visible_columns
+from app.pipeline.sensitive_data import visible_rows
 
 
 def test_visible_columns_hides_internal_source_rows() -> None:
@@ -16,3 +17,16 @@ def test_format_value_prints_payment_calendar_values() -> None:
     assert format_value("project", "moskovsky") == "Московский"
     assert format_value("article_kind", "payment_total") == "Итого платежи"
     assert format_value("fact", 2520223) == "2 520 223 руб."
+
+
+def test_visible_rows_keeps_agent_name_for_reports() -> None:
+    rows = visible_rows(
+        [
+            {
+                "agent_name": "ИП Иванов И.",
+                "buyer_name": "Петров Петр Петрович",
+            },
+        ],
+    )
+
+    assert rows == [{"agent_name": "ИП Иванов И.", "buyer_name": "[скрыто]"}]

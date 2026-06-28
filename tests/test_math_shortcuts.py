@@ -143,3 +143,12 @@ def test_resolve_math_shortcut_does_not_treat_model_word_as_divide() -> None:
     )
 
     assert result.handled is False
+
+
+def test_resolve_math_shortcut_does_not_treat_sections_word_as_divide() -> None:
+    result = resolve_math_shortcut(
+        "какие разделы есть в платежном календаре?",
+        {"rows": [{"plan": 100}], "metrics": ["plan"]},
+    )
+
+    assert result.handled is False

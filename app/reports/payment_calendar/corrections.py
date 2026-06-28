@@ -10,7 +10,7 @@ from app.pipeline.failed_query import (
 from app.reports.payment_calendar.compatibility import PAYMENT_CALENDAR_UNSUPPORTED_METRIC_ALIASES
 
 
-PAYMENT_CALENDAR_REPORT_MARKERS = ("платежный календар", "платежному календар")
+PAYMENT_CALENDAR_REPORT_MARKERS = ("платежный календар", "платежному календар", "платежном календар")
 PAYMENT_CALENDAR_UNSUPPORTED_GROUP_BY_MARKERS = {
     "floor": ("по этаж", "этажам", "этажи"),
     "room_type": ("по типам помещ", "типам помещ", "помещениям"),
@@ -179,6 +179,34 @@ def build_payment_calendar_view_correction(
     has_report_marker = any(marker in normalized_text for marker in PAYMENT_CALENDAR_REPORT_MARKERS)
     if not has_report_marker and not payment_calendar_context:
         return None
+
+    list_markers = {"какие", "какой", "список", "перечень", "есть", "доступные"}
+    is_list_question = any(marker in normalized_text for marker in list_markers)
+    if "раздел" in normalized_text and is_list_question:
+        return LLMParsedResponse(
+            intent=Intent.DIMENSION_QUERY,
+            state_delta=StateDelta.model_validate(
+                {
+                    "report_type": "payment_calendar",
+                    "dimension": "article_kind",
+                    "filters": {},
+                },
+            ),
+            confidence=1,
+        )
+    if "стат" in normalized_text and is_list_question:
+        filters = {"article_kind": "detail"} if "расход" in normalized_text else {}
+        return LLMParsedResponse(
+            intent=Intent.DIMENSION_QUERY,
+            state_delta=StateDelta.model_validate(
+                {
+                    "report_type": "payment_calendar",
+                    "dimension": "article",
+                    "filters": filters,
+                },
+            ),
+            confidence=1,
+        )
 
     correction = resolve_payment_calendar_metric_or_view_correction(normalized_text)
     if correction is None:

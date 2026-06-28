@@ -14,7 +14,7 @@ PROJECT_MARKERS = ("проект", "объект")
 PERIOD_MARKERS = ("период", "месяц", "месяцы", "дата", "даты")
 ARTICLE_MARKERS = ("стат",)
 EXPENSE_MARKERS = ("расход", "затрат")
-ROW_KIND_MARKERS = ("тип строк", "типы строк", "вид строк", "виды строк", "категор", "строк")
+ROW_KIND_MARKERS = ("тип строк", "типы строк", "вид строк", "виды строк", "категор", "строк", "раздел")
 
 
 def has_any_marker(text: str, markers: tuple[str, ...]) -> bool:

@@ -117,6 +117,18 @@ def test_payment_calendar_explicit_article_view_keeps_requested_period() -> None
     assert parsed.state_delta.metrics == ["plan", "fact", "deviation"]
 
 
+def test_payment_calendar_sections_question_becomes_article_kind_dimension() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "какие разделы есть в платежном календаре?",
+    )
+
+    assert parsed is not None
+    assert parsed.intent == "dimension_query"
+    assert parsed.state_delta.report_type == "payment_calendar"
+    assert parsed.state_delta.dimension == "article_kind"
+
+
 def test_model_failed_metric_can_be_corrected_to_kpi() -> None:
     state, parsed = build_forced_parsed_response(
         {
