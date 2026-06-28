@@ -15,6 +15,11 @@ ROADMAP_UNSUPPORTED_METRIC_ALIASES = {
     "поступлен": "поступления",
     "этаж": "этажи",
 }
+ROADMAP_UNSUPPORTED_METRICS = {
+    "plan": "план",
+    "fact": "факт",
+    "deviation": "отклонение",
+}
 
 ROADMAP_COMPATIBILITY_MESSAGE_TEMPLATE = (
     'В дорожной карте нет показателя "{metric}".\n\n'
@@ -40,6 +45,13 @@ def find_roadmap_unsupported_metric(text: str | None) -> str | None:
     return None
 
 
+def find_roadmap_unsupported_frame_metric(frame: QueryFrame) -> str | None:
+    for metric in frame.metrics:
+        if metric in ROADMAP_UNSUPPORTED_METRICS:
+            return ROADMAP_UNSUPPORTED_METRICS[metric]
+    return None
+
+
 def check_roadmap_compatibility(frame: QueryFrame, user_text: str | None) -> CompatibilityCheck:
     unsupported_group_by = [group_by for group_by in frame.group_by if group_by not in ROADMAP_ALLOWED_GROUP_BY]
     if unsupported_group_by:
@@ -52,7 +64,7 @@ def check_roadmap_compatibility(frame: QueryFrame, user_text: str | None) -> Com
             ),
         )
 
-    unsupported_metric = find_roadmap_unsupported_metric(user_text)
+    unsupported_metric = find_roadmap_unsupported_frame_metric(frame) or find_roadmap_unsupported_metric(user_text)
     if unsupported_metric is None:
         return CompatibilityCheck(valid=True)
 

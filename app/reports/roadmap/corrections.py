@@ -9,6 +9,45 @@ from app.pipeline.failed_query import (
 )
 
 
+ROADMAP_MONTHS = (
+    "январь",
+    "января",
+    "февраль",
+    "февраля",
+    "март",
+    "марта",
+    "апрель",
+    "апреля",
+    "май",
+    "мая",
+    "июнь",
+    "июня",
+    "июль",
+    "июля",
+    "август",
+    "августа",
+    "сентябрь",
+    "сентября",
+    "октябрь",
+    "октября",
+    "ноябрь",
+    "ноября",
+    "декабрь",
+    "декабря",
+)
+
+
+def extract_roadmap_period_label(text: str | None) -> str | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+    words = normalized_text.split()
+    for month in ROADMAP_MONTHS:
+        if month in words:
+            return month
+    return None
+
+
 def has_roadmap_step_word(normalized_text: str) -> bool:
     words = normalized_text.split()
     return any(word.startswith("этап") or word.startswith("шаг") for word in words)
@@ -81,6 +120,34 @@ def build_failed_roadmap_correction(
         return None
 
     recovery = resolve_roadmap_recovery(text)
+    if recovery is None:
+        period_label = extract_roadmap_period_label(text)
+        if period_label is not None:
+            delta_data = {
+                "period": {"label": period_label},
+                "metrics": failed_state.get("metrics") or [],
+                "view": failed_state.get("view"),
+                "filters": failed_state.get("filters") or {},
+                "group_by": failed_state.get("group_by") or [],
+            }
+            corrected_state = dict(failed_state)
+            corrected_state.update(delta_data)
+            corrected_state["report_type"] = "roadmap"
+            corrected_state["project"] = "all"
+            corrected_state["awaiting_clarification"] = False
+            corrected_state["clarification_target"] = None
+            corrected_state["clarification_base_state"] = None
+            corrected_state["clarification_kind"] = None
+            corrected_state["clarification_options"] = []
+            corrected_state = clear_failed_query_markers(corrected_state)
+            return (
+                corrected_state,
+                LLMParsedResponse(
+                    intent=Intent.DATA_QUERY,
+                    state_delta=StateDelta.model_validate(delta_data),
+                    confidence=1,
+                ),
+            )
     if recovery is None:
         return None
 
