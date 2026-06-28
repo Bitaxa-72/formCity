@@ -68,12 +68,15 @@ def resolve_payment_calendar_period_label(text: str | None) -> str | None:
 
 def resolve_payment_calendar_metric(text: str | None) -> list[str]:
     normalized_text = normalize_search_text(text or "")
-    if "факт" in normalized_text:
-        return ["fact"]
-    if "отклон" in normalized_text or "разниц" in normalized_text:
-        return ["deviation"]
+    metrics = []
     if "план" in normalized_text:
-        return ["plan"]
+        metrics.append("plan")
+    if "факт" in normalized_text:
+        metrics.append("fact")
+    if "отклон" in normalized_text or "разниц" in normalized_text:
+        metrics.append("deviation")
+    if metrics:
+        return metrics
     return ["plan", "fact", "deviation"]
 
 
@@ -138,6 +141,9 @@ def resolve_payment_calendar_metric_or_view_correction(text: str | None) -> dict
     if not normalized_text:
         return None
 
+    if any(marker in normalized_text for marker in ("по стать", "статьи", "подроб", "детал")):
+        return {"metrics": resolve_payment_calendar_metric(normalized_text), "view": "details", "filters": {}}
+
     metric_markers: dict[str, tuple[str, ...]] = {
         "plan": ("план", "планов"),
         "fact": ("факт", "фактичес"),
@@ -149,16 +155,64 @@ def resolve_payment_calendar_metric_or_view_correction(text: str | None) -> dict
 
     view_markers: dict[str, tuple[str, ...]] = {
         "summary": ("итог", "свод"),
-        "income": ("поступ",),
-        "payments": ("платеж", "расход"),
         "balance_start": ("остаток на начал", "начал"),
         "balance_end": ("остаток на конец", "конец"),
+        "income": ("поступ",),
+        "payments": ("итого платеж", "платежи", "расход"),
         "details": ("стать", "детал", "подроб"),
     }
     for view, aliases in view_markers.items():
         if any(alias in normalized_text for alias in aliases):
             return {"metrics": ["plan", "fact", "deviation"], "view": view, "filters": {}}
     return None
+
+
+def build_payment_calendar_view_correction(
+    text: str | None,
+    *,
+    payment_calendar_context: bool = False,
+) -> LLMParsedResponse | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+
+    has_report_marker = any(marker in normalized_text for marker in PAYMENT_CALENDAR_REPORT_MARKERS)
+    if not has_report_marker and not payment_calendar_context:
+        return None
+
+    correction = resolve_payment_calendar_metric_or_view_correction(normalized_text)
+    if correction is None:
+        if "остат" in normalized_text and (has_report_marker or payment_calendar_context):
+            return LLMParsedResponse(
+                intent=Intent.DATA_QUERY,
+                state_delta=StateDelta.model_validate({"report_type": "payment_calendar"}),
+                needs_clarification=True,
+                clarification_question="Уточните, какой остаток показать в платежном календаре: на начало или на конец периода.",
+                confidence=1,
+            )
+        return None
+    if correction["view"] is None:
+        return None
+
+    state_delta: dict[str, object] = {
+        "report_type": "payment_calendar",
+        "metrics": correction["metrics"],
+        "view": correction["view"],
+        "filters": correction["filters"] or {},
+        "group_by": [],
+    }
+    project = resolve_payment_calendar_project(normalized_text)
+    if project:
+        state_delta["project"] = project
+    period_label = resolve_payment_calendar_period_label(normalized_text)
+    if period_label:
+        state_delta["period"] = {"label": period_label}
+
+    return LLMParsedResponse(
+        intent=Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(state_delta),
+        confidence=1,
+    )
 
 
 def remove_unsupported_metric_article_filter(filters: object) -> dict[str, object]:
