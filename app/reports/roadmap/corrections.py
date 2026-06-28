@@ -171,3 +171,26 @@ def build_failed_roadmap_correction(
         confidence=1,
     )
     return corrected_state, parsed_response
+
+
+def build_roadmap_context_correction(
+    state: dict[str, object] | None,
+    text: str | None,
+) -> LLMParsedResponse | None:
+    if not state or state.get("report_type") != "roadmap":
+        return None
+
+    normalized_text = normalize_search_text(text or "")
+    if not has_roadmap_step_word(normalized_text):
+        return None
+
+    recovery = resolve_roadmap_recovery(normalized_text)
+    if recovery is None:
+        return None
+
+    intent, delta_data = recovery
+    return LLMParsedResponse(
+        intent=Intent.DIMENSION_QUERY if intent == "dimension_query" else Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(delta_data),
+        confidence=1,
+    )

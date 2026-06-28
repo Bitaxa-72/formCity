@@ -2,7 +2,7 @@ from app.pipeline.failed_query import CONTEXT_BLOCKED_AFTER_ERROR, FAILED_QUERY_
 from app.pipeline.query_frame import build_query_frame
 from app.pipeline.report_semantics import apply_report_semantics
 from app.reports.roadmap.compatibility import check_roadmap_compatibility
-from app.reports.roadmap.corrections import build_failed_roadmap_correction, resolve_roadmap_recovery
+from app.reports.roadmap.corrections import build_failed_roadmap_correction, build_roadmap_context_correction, resolve_roadmap_recovery
 
 
 def test_resolve_roadmap_recovery_detects_steps_word() -> None:
@@ -64,6 +64,24 @@ def test_failed_roadmap_periods_followup_clears_failed_period() -> None:
     assert state["period"] == {"from": None, "to": None, "label": None}
     assert parsed.intent == "dimension_query"
     assert parsed.state_delta.dimension == "period_month"
+
+
+def test_roadmap_context_steps_followup_switches_from_duration_to_steps() -> None:
+    parsed = build_roadmap_context_correction(
+        {
+            "report_type": "roadmap",
+            "period": {"label": "апрель"},
+            "view": "total_duration",
+            "metrics": ["duration_min", "duration_max"],
+        },
+        "этапы",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.view == "roadmap_steps"
+    assert parsed.state_delta.metrics == ["duration_min", "duration_max"]
+    assert parsed.state_delta.filters == {}
+    assert parsed.state_delta.group_by == []
 
 
 def test_roadmap_compatibility_rejects_plan_metric_from_frame() -> None:
