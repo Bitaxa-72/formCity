@@ -85,6 +85,8 @@ def apply_agents_report_view(frame: QueryFrame) -> QueryFrame:
     else:
         filters["source_kind"] = "deals"
         metrics = metrics or AGENTS_REPORT_DEFAULT_METRICS.copy()
+        if ("agent" in filters or "agent_contains" in filters) and "agent" not in group_by:
+            group_by.append("agent")
 
     return frame.model_copy(
         update={

@@ -324,4 +324,5 @@ def test_agents_agent_filter_limits_summary() -> None:
     )
 
     assert calculation.row_count == 1
+    assert "Агент: Сидоров Семен" in draft.text
     assert "Агентское вознаграждение: 240 000 руб." in draft.text
