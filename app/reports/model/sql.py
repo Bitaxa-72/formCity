@@ -65,6 +65,12 @@ def kpi_sum_metric(metric_key: str) -> MetricSQLSpec:
     return MetricSQLSpec(expression, metric_key)
 
 
+def kpi_metric_by_sign(metric_key: str, positive: bool, alias: str) -> MetricSQLSpec:
+    sign_filter = ">= 0" if positive else "< 0"
+    expression = f"MAX(CASE WHEN metric_key = '{metric_key}' AND normalized_value {sign_filter} THEN normalized_value END)"
+    return MetricSQLSpec(expression, alias)
+
+
 MODEL_SQL_TEMPLATE = ReportSQLTemplate(
     table=MODEL_FACTS_TABLE_SQL,
     date_column="snapshot_month",
@@ -80,6 +86,8 @@ MODEL_SQL_TEMPLATE = ReportSQLTemplate(
         "model_total_area": kpi_metric("model_total_area"),
         "model_units_count": kpi_sum_metric("model_units_count"),
         "model_pir": kpi_metric("model_pir"),
+        "model_pir_total": kpi_metric_by_sign("model_pir", positive=False, alias="model_pir_total"),
+        "model_pir_per_sqm": kpi_metric_by_sign("model_pir", positive=True, alias="model_pir_per_sqm"),
     },
     group_by_columns=MODEL_GROUP_BY_COLUMNS,
     filter_columns=MODEL_FILTER_COLUMNS,

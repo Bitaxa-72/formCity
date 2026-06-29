@@ -29,6 +29,8 @@ METRIC_LABELS = {
     "model_total_area": "Общая площадь",
     "model_units_count": "Количество помещений",
     "model_pir": "ПИР",
+    "model_pir_total": "ПИР",
+    "model_pir_per_sqm": "ПИР на м2",
     "amount": "Сумма",
     "executed_amount": "Исполнено",
     "remaining_amount": "Остаток / прогноз",

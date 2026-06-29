@@ -25,4 +25,6 @@ MODEL_METRICS = {
     "model_total_area": MetricSpec(unit="square_meter", group_by=MODEL_GROUP_BY, filters=MODEL_FILTERS, projects=MODEL_PROJECTS),
     "model_units_count": MetricSpec(unit="count", group_by=MODEL_GROUP_BY, filters=MODEL_FILTERS, projects=MODEL_PROJECTS),
     "model_pir": MetricSpec(unit="rub", group_by=MODEL_GROUP_BY, filters=MODEL_FILTERS, projects=MODEL_PROJECTS),
+    "model_pir_total": MetricSpec(unit="rub", group_by=MODEL_GROUP_BY, filters=MODEL_FILTERS, projects=MODEL_PROJECTS),
+    "model_pir_per_sqm": MetricSpec(unit="rub_per_square_meter", group_by=MODEL_GROUP_BY, filters=MODEL_FILTERS, projects=MODEL_PROJECTS),
 }

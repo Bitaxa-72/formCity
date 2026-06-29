@@ -164,6 +164,11 @@ def test_model_metric_keys_support_multiple_metrics() -> None:
     assert find_model_metric_keys("финансовая модель NPV LLCR за февраль") == ["model_npv", "model_llcr"]
 
 
+def test_model_metric_keys_expand_profit_and_pir_variants() -> None:
+    assert find_model_metric_keys("модель прибыль") == ["model_gross_profit", "model_net_profit"]
+    assert find_model_metric_keys("модель ПИР") == ["model_pir_total", "model_pir_per_sqm"]
+
+
 def test_model_metric_correction_uses_model_context_for_short_metric() -> None:
     correction = build_model_metric_correction("ROE", model_context=True)
 

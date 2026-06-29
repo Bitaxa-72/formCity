@@ -78,7 +78,7 @@ MODEL_METRIC_ALIASES = {
     "model_roe": ("roe", "рое", "процент"),
     "model_llcr": ("llcr", "ллср", "лср"),
     "model_units_count": ("количество помещений",),
-    "model_pir": ("пир",),
+    "model_pir_total": ("пир",),
 }
 MODEL_COMPARISON_MARKERS = (
     "сравнен",
@@ -382,6 +382,10 @@ def find_model_metric_keys(text: str | None) -> list[str]:
     for metric, aliases in MODEL_METRIC_ALIASES.items():
         if any(alias in normalized_text for alias in aliases):
             found.append(metric)
+    if "model_pir_total" in found and "model_pir_per_sqm" not in found:
+        found.append("model_pir_per_sqm")
+    if not found and "прибыл" in normalized_text:
+        found.extend(["model_gross_profit", "model_net_profit"])
     return found
 
 

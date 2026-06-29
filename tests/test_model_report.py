@@ -366,6 +366,31 @@ def test_model_square_meters_uses_total_area_metric() -> None:
     assert "Общая площадь: 56 279.3 м2" in draft.text
 
 
+def test_model_pir_query_returns_total_and_per_sqm_variants() -> None:
+    session = create_session()
+    add_model_source(session, date(2026, 4, 1))
+    add_model_comparison(session, date(2026, 4, 1), "ПИР", "model_pir", Decimal("-162810134.35"), 1)
+    add_model_comparison(session, date(2026, 4, 1), "ПИР", "model_pir", Decimal("4353.36"), 2)
+    session.commit()
+
+    draft, calculation, query = build_model_answer(
+        session,
+        {
+            "last_intent": "data_query",
+            "report_type": "model",
+            "period": {"label": "апрель"},
+            "metrics": ["model_pir_total", "model_pir_per_sqm"],
+            "view": "model_kpi",
+        },
+    )
+
+    assert query.metrics == ["model_pir_total", "model_pir_per_sqm"]
+    assert calculation.rows[0]["model_pir_total"] == -162810134.35
+    assert calculation.rows[0]["model_pir_per_sqm"] == 4353.36
+    assert "ПИР: -162 810 134.35 руб." in draft.text
+    assert "ПИР на м2: 4 353.36 руб./м2" in draft.text
+
+
 def test_model_metric_query_uses_comparison_table() -> None:
     session = create_session()
     add_model_source(session, date(2026, 4, 1))

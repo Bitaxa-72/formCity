@@ -62,6 +62,8 @@ COLUMN_LABELS = {
     "model_total_area": "Общая площадь",
     "model_units_count": "Количество помещений",
     "model_pir": "ПИР",
+    "model_pir_total": "ПИР",
+    "model_pir_per_sqm": "ПИР на м2",
     "raw_sheet": "Лист",
     "row_count": "Строк",
     "cell_count": "Ячеек",
@@ -100,6 +102,7 @@ MONEY_COLUMNS = {
     "model_net_profit",
     "model_npv",
     "model_pir",
+    "model_pir_total",
 }
 
 
@@ -149,9 +152,18 @@ def format_value(column: str, value: Any) -> str:
         return RAW_SHEET_LABELS.get(normalized, value)
     if column in MONEY_COLUMNS and isinstance(value, int | float):
         return f"{format_number(value)} руб."
+    if column == "model_pir_per_sqm" and isinstance(value, int | float):
+        return f"{format_number(value)} руб./м2"
     if isinstance(value, int | float):
         return format_number(value)
     return str(value)
+
+
+def format_pdf_text(column: str, value: Any) -> str:
+    text = format_value(column, value)
+    if column == "values_preview":
+        text = text.replace(" | ", "<br/>")
+    return text
 
 
 def build_report_title_lines(source: dict[str, Any]) -> list[str]:
@@ -185,6 +197,37 @@ def column_label(column: str) -> str:
     return COLUMN_LABELS.get(column, column)
 
 
+def build_model_raw_rows_pdf_elements(
+    calculation_result: CalculationResult,
+    verification: ResultVerification,
+    title_style: ParagraphStyle,
+    body_style: ParagraphStyle,
+) -> list[Any]:
+    elements = [Paragraph(build_report_title_lines(verification.source)[0], title_style)]
+    for line in build_report_title_lines(verification.source)[1:]:
+        elements.append(Paragraph(line, body_style))
+    elements.extend([Paragraph(f"Строк: {calculation_result.row_count}", body_style), Spacer(1, 12)])
+
+    rows = visible_rows(calculation_result.rows)
+    for row in rows:
+        raw_sheet = row.get("raw_sheet")
+        row_number = row.get("row_number")
+        row_label = row.get("row_label") or "без названия"
+        title_parts = []
+        if raw_sheet is not None:
+            title_parts.append(f"Лист: {format_value('raw_sheet', raw_sheet)}")
+        if row_number is not None:
+            title_parts.append(f"Строка {format_number(row_number)}")
+        title_parts.append(str(row_label))
+        elements.append(Paragraph(" - ".join(title_parts), body_style))
+
+        values_preview = row.get("values_preview")
+        if values_preview is not None:
+            elements.append(Paragraph(format_pdf_text("values_preview", values_preview), body_style))
+        elements.append(Spacer(1, 8))
+    return elements
+
+
 def build_pdf_report(
     calculation_result: CalculationResult,
     verification: ResultVerification,
@@ -215,6 +258,12 @@ def build_pdf_report(
         leading=11,
     )
 
+    if verification.source.get("report_type") == "model" and verification.source.get("view") in {"model_raw_rows", "model_raw_search"}:
+        elements = build_model_raw_rows_pdf_elements(calculation_result, verification, title_style, body_style)
+        document.build(elements)
+        filename = f"{verification.source.get('report_type') or 'report'}.pdf"
+        return buffer.getvalue(), filename
+
     elements = [Paragraph(build_report_title_lines(verification.source)[0], title_style)]
     for line in build_report_title_lines(verification.source)[1:]:
         elements.append(Paragraph(line, body_style))
@@ -224,7 +273,7 @@ def build_pdf_report(
     rows = visible_rows(calculation_result.rows)
     data = [[Paragraph(column_label(column), body_style) for column in columns]]
     for row in rows:
-        data.append([Paragraph(format_value(column, row.get(column)), body_style) for column in columns])
+        data.append([Paragraph(format_pdf_text(column, row.get(column)), body_style) for column in columns])
 
     table = Table(data, repeatRows=1)
     table.setStyle(

@@ -109,6 +109,8 @@ METRIC_LABELS = {
     "model_total_area": "\u041e\u0431\u0449\u0430\u044f \u043f\u043b\u043e\u0449\u0430\u0434\u044c",
     "model_units_count": "\u041a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e \u043f\u043e\u043c\u0435\u0449\u0435\u043d\u0438\u0439",
     "model_pir": "\u041f\u0418\u0420",
+    "model_pir_total": "\u041f\u0418\u0420",
+    "model_pir_per_sqm": "\u041f\u0418\u0420 \u043d\u0430 \u043c2",
     "amount": "Сумма",
     "executed_amount": "Исполнено",
     "remaining_amount": "Остаток / прогноз",
@@ -280,7 +282,8 @@ MODEL_SAFE_METRICS = [
     "model_llcr",
     "model_total_area",
     "model_units_count",
-    "model_pir",
+    "model_pir_total",
+    "model_pir_per_sqm",
 ]
 RAW_SHEET_LABELS = {
     "consolidation": "Для консолидации",
