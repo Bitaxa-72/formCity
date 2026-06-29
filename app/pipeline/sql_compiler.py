@@ -166,6 +166,7 @@ def compile_model_raw_rows_sql(frame: QueryFrame) -> SQLQuery:
             "        AND hc.row_number < r.row_number\n"
             "        AND hc.is_sensitive = 0\n"
             "        AND hc.value_text IS NOT NULL\n"
+            "        AND hc.value_text GLOB '*[^0-9., -]*'\n"
             "      ORDER BY hc.row_number DESC\n"
             "      LIMIT 1\n"
             "    ), ''),\n"

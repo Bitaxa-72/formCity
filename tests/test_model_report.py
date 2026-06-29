@@ -638,6 +638,71 @@ def test_model_raw_search_filters_rows_and_formats_values() -> None:
     assert "Машиноместа" not in draft.text
 
 
+def test_model_raw_search_uses_text_headers_not_previous_numeric_rows() -> None:
+    session = create_session()
+    add_model_source(session, date(2026, 4, 1))
+    add_model_raw_sheet(session, date(2026, 4, 1), "Остатки", "remains", 12, 20)
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Остатки",
+        "remains",
+        3,
+        "ВСЕГО",
+        [
+            (10, "J", "ВСЕГО", None, False),
+            (11, "K", "ИСПОЛНЕНО", None, False),
+            (12, "L", "ОСТАТОК", None, False),
+        ],
+    )
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Остатки",
+        "remains",
+        7,
+        "Поступления, млн.руб.",
+        [
+            (10, "J", "10968986022.46", None, False),
+            (11, "K", "9565868888.46", None, False),
+            (12, "L", "1403117134", None, False),
+        ],
+    )
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Остатки",
+        "remains",
+        10,
+        "Продажи, м2",
+        [
+            (9, "I", "Продажи, м2", None, False),
+            (10, "J", "37750.72", None, False),
+            (11, "K", "33673.91", None, False),
+            (12, "L", "4076.81", None, False),
+        ],
+    )
+    session.commit()
+
+    draft, calculation, query = build_model_answer(
+        session,
+        {
+            "last_intent": "data_query",
+            "report_type": "model",
+            "view": "model_raw_search",
+            "filters": {"raw_sheet": "остатки", "raw_query": "продажи"},
+        },
+    )
+
+    assert query.params["raw_sheet"] == "remains"
+    assert calculation.row_count == 1
+    assert "Продажи:" in draft.text
+    assert "- Всего: 37 750.72 м2" in draft.text
+    assert "- Исполнено: 33 673.91 м2" in draft.text
+    assert "- Остаток: 4 076.81 м2" in draft.text
+    assert "10968986022.46:" not in draft.text
+
+
 def test_model_raw_search_finds_capitalized_row_label_and_formats_values() -> None:
     session = create_session()
     add_model_source(session, date(2026, 4, 1))
