@@ -595,6 +595,15 @@ def test_model_raw_search_filters_rows_and_formats_values() -> None:
         date(2026, 4, 1),
         "Остатки",
         "remains",
+        1,
+        "ВСЕГО",
+        [(2, "B", "ВСЕГО", None, False), (3, "C", "ИСПОЛНЕНО", None, False)],
+    )
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Остатки",
+        "remains",
         2,
         "Коммерческие помещения",
         [(1, "A", "Коммерческие помещения", None, False), (2, "B", None, Decimal("2070800544.23"), False)],
@@ -622,8 +631,9 @@ def test_model_raw_search_filters_rows_and_formats_values() -> None:
 
     assert query.params["raw_sheet"] == "remains"
     assert calculation.row_count == 1
-    assert "Строка 2. Коммерческие помещения" in draft.text
-    assert "Суммы по строке: 2 070 800 544.23" in draft.text
+    assert "Коммерческие помещения:" in draft.text
+    assert "- Всего: 2 070.8 млн руб." in draft.text
+    assert "Строка 2. Коммерческие помещения" not in draft.text
     assert "Технически:" not in draft.text
     assert "Машиноместа" not in draft.text
 
@@ -660,6 +670,9 @@ def test_model_raw_search_finds_capitalized_row_label_and_formats_values() -> No
 
     assert query.params["raw_sheet"] == "financial_model"
     assert calculation.row_count == 1
-    assert "Строка 8. Общая площадь" in draft.text
-    assert "Значения строки: 56 279.3; IRR; 0.1" in draft.text
+    assert "Общая площадь:" in draft.text
+    assert "- Значение 2: 56 279.3" in draft.text
+    assert "- Значение 3: IRR" in draft.text
+    assert "- Значение 4: 0.1" in draft.text
+    assert "Строка 8. Общая площадь" not in draft.text
     assert "Технически:" not in draft.text

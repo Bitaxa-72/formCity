@@ -210,6 +210,99 @@ def raw_values_caption(raw_sheet: object, readable_values: list[str]) -> str:
     return "Значения строки"
 
 
+def clean_model_raw_label(value: object) -> str:
+    label = str(value or "").strip()
+    for suffix in [", млн.руб.", ", млн руб.", ", м2", ", м²"]:
+        if label.casefold().endswith(suffix.casefold()):
+            return label[: -len(suffix)].strip()
+    return label
+
+
+def clean_model_raw_header(value: str) -> str:
+    header = " ".join(value.strip().split())
+    if not header:
+        return ""
+    replacements = {
+        "ВСЕГО": "Всего",
+        "ИСПОЛНЕНО": "Исполнено",
+        "ОСТАТОК": "Остаток",
+    }
+    upper = header.upper()
+    if upper in replacements:
+        return replacements[upper]
+    if upper.startswith("ИСПОЛНЕНО "):
+        return "Исполнено " + header[len("ИСПОЛНЕНО ") :].lower()
+    return header
+
+
+def infer_model_raw_unit(raw_sheet: object, row_label: object, values: list[tuple[str, str]]) -> str | None:
+    label = str(row_label or "").casefold()
+    if "млн" in label and "руб" in label:
+        return "million_rub"
+    if "м2" in label or "м²" in label:
+        return "sqm"
+    if "руб" in label:
+        return "rub"
+    if model_raw_sheet_key(raw_sheet) == "remains":
+        numbers = [
+            number
+            for _, value in values
+            for number in [parse_float_text(value)]
+            if number is not None
+        ]
+        if numbers and max(abs(number) for number in numbers) >= 1_000_000:
+            return "million_rub"
+        if numbers:
+            return "sqm"
+    return None
+
+
+def format_model_raw_value(value: str, unit: str | None) -> str:
+    number = parse_float_text(value)
+    if number is None:
+        return value
+    if unit == "million_rub":
+        return f"{format_number(number / 1_000_000)} млн руб."
+    if unit == "rub":
+        return f"{format_number(number)} руб."
+    if unit == "sqm":
+        return f"{format_number(number)} м2"
+    return format_number(number)
+
+
+def build_model_raw_value_lines(
+    raw_sheet: object,
+    row_label: object,
+    values_preview: object,
+    header_preview: object,
+    max_items: int = 8,
+) -> list[str]:
+    values = parse_raw_values_preview(values_preview)
+    headers = dict(parse_raw_values_preview(header_preview))
+    label = str(row_label or "").strip().casefold()
+    unit = infer_model_raw_unit(raw_sheet, row_label, values)
+    result = []
+    seen = set()
+    for index, (column, value) in enumerate(values, start=1):
+        normalized = value.strip().casefold()
+        if not normalized or normalized == label:
+            continue
+        if len(value) > 40 and parse_float_text(value) is None:
+            continue
+        header = clean_model_raw_header(headers.get(column, ""))
+        if not header or header.casefold() == label:
+            header = f"Значение {index}"
+        formatted = format_model_raw_value(value, unit)
+        line = f"- {header}: {formatted}"
+        if line in seen:
+            continue
+        result.append(line)
+        seen.add(line)
+        if len(result) >= max_items:
+            break
+    return result
+
+
 def build_answer_header(response_data: ResponseData) -> list[str]:
     source = response_data.source
     report_type = source.get("report_type")
@@ -404,13 +497,23 @@ def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
         for row in response_data.table.rows:
             row_number = row.get("row_number")
             row_label = row.get("row_label") or "без названия"
-            prefix = f"Строка {format_number(row_number)}" if row_number is not None else "Строка"
-            lines.append(f"{prefix}. {row_label}")
+            title = clean_model_raw_label(row_label)
+            if row_number is not None:
+                lines.append(f"{title}:")
+            else:
+                lines.append(f"{title}:")
             values_preview = row.get("values_preview")
-            readable_values = readable_raw_values(row_label, values_preview)
+            header_preview = row.get("header_preview")
+            readable_values = build_model_raw_value_lines(
+                raw_sheet if isinstance(filters, dict) else None,
+                row_label,
+                values_preview,
+                header_preview,
+            )
             if readable_values:
-                caption = raw_values_caption(raw_sheet if isinstance(filters, dict) else None, readable_values)
-                lines.append(f"{caption}: {'; '.join(readable_values)}")
+                lines.extend(readable_values)
+            elif row_number is not None:
+                lines[-1] = f"Строка {format_number(row_number)}. {row_label}"
             lines.append("")
 
         if lines and lines[-1] == "":
