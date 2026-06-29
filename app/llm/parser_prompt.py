@@ -121,11 +121,11 @@ Roadmap rules:
 - If the user asks for a numbered roadmap step, use view="step_details" and filters.step_no=<number>.
 - If no roadmap period is specified, omit period; backend will use the latest available month and tell the user.
 
-Model raw rules:
+Model source sheet rules:
 - For report_type="model", "какие листы", "список листов", "какие таблицы есть" means intent="dimension_query", view="model_raw_sheets", dimension="raw_sheet".
 - For "ФМ", "ФМ план", "NEWKPI", "NEWKPI план", "паспорт", "проценты", "сравнение", "финмодель", "лист финмодель", "остатки", "лист остатки", "для консолидации", set view="model_raw_rows" and filters.raw_sheet to the mentioned sheet phrase.
-- For "найди", "поиск", "строка", "значение" inside a model raw sheet, set view="model_raw_search"; put the search phrase into filters.raw_query and sheet phrase into filters.raw_sheet when present.
-- For model raw views, do not set metrics.
+- For "найди", "поиск", "строка", "значение" inside a model source sheet, set view="model_raw_search"; put the search phrase into filters.raw_query and sheet phrase into filters.raw_sheet when present.
+- For model source sheet views, do not set metrics.
 - If no model period is specified, omit period; backend will use the latest available model snapshot and tell the user.
 
 Debt and bookings rules:

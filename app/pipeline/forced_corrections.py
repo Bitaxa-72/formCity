@@ -7,6 +7,7 @@ from app.reports.model.corrections import (
     build_failed_model_metric_correction,
     build_model_metric_correction,
     build_model_period_summary_correction,
+    build_model_raw_followup_correction,
     build_model_raw_rows_correction,
     build_model_raw_sheet_list_correction,
     build_model_sensitive_correction,
@@ -42,6 +43,7 @@ def build_forced_parsed_response(
     forced_parsed_response: LLMParsedResponse | None = None
     model_context = current_state.get("report_type") == "model"
     model_fallback_period = current_state.get("period") if isinstance(current_state.get("period"), dict) else None
+    model_raw_followup_correction = build_model_raw_followup_correction(current_state, text)
     model_available_metrics_correction = build_model_available_metrics_correction(text, model_context=model_context)
     model_sensitive_correction = build_model_sensitive_correction(text)
     model_raw_sheet_list_correction = build_model_raw_sheet_list_correction(text, model_context=model_context)
@@ -82,7 +84,9 @@ def build_forced_parsed_response(
     agents_report_correction = build_agents_report_correction(text)
     summary_correction = build_summary_correction(text)
     agents_report_context = current_state.get("report_type") == "agents_report"
-    if model_available_metrics_correction is not None:
+    if model_raw_followup_correction is not None:
+        forced_parsed_response = model_raw_followup_correction
+    elif model_available_metrics_correction is not None:
         forced_parsed_response = model_available_metrics_correction
     elif model_sensitive_correction is not None:
         forced_parsed_response = model_sensitive_correction

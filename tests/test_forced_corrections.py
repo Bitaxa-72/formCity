@@ -19,6 +19,23 @@ def test_agents_context_takes_priority_over_stock_for_remaining_word() -> None:
     assert parsed.state_delta.filters == {"agent_contains": "Славгородский"}
 
 
+def test_model_source_sheet_context_turns_short_text_into_sheet_search() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {
+            "report_type": "model",
+            "view": "model_raw_rows",
+            "period": {"label": "апрель"},
+            "filters": {"raw_sheet": "remains"},
+        },
+        "помещения",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type is None
+    assert parsed.state_delta.view == "model_raw_search"
+    assert parsed.state_delta.filters == {"raw_sheet": "remains", "raw_query": "помещения"}
+
+
 def test_payment_calendar_failed_group_by_can_be_corrected_to_projects() -> None:
     state, parsed = build_forced_parsed_response(
         {

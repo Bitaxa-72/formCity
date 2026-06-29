@@ -3,6 +3,7 @@ from app.reports.model.corrections import (
     build_model_comparison_correction,
     build_model_metric_correction,
     build_model_period_summary_correction,
+    build_model_raw_followup_correction,
     build_model_raw_rows_correction,
     build_model_raw_sheet_list_correction,
     build_model_sensitive_correction,
@@ -110,6 +111,25 @@ def test_build_model_raw_search_correction_strips_finmodel_sheet_alias_from_quer
     assert correction.state_delta.filters == {"raw_sheet": "financial_model", "raw_query": "общая площадь"}
     assert correction.state_delta.period is not None
     assert correction.state_delta.period.label == "апрель"
+
+
+def test_build_model_raw_followup_correction_uses_current_sheet_context() -> None:
+    correction = build_model_raw_followup_correction(
+        {
+            "report_type": "model",
+            "view": "model_raw_rows",
+            "period": {"label": "апрель"},
+            "filters": {"raw_sheet": "remains"},
+        },
+        "помещения",
+    )
+
+    assert correction is not None
+    assert correction.intent == "data_query"
+    assert correction.state_delta.report_type is None
+    assert correction.state_delta.view == "model_raw_search"
+    assert correction.state_delta.filters == {"raw_sheet": "remains", "raw_query": "помещения"}
+    assert correction.state_delta.metrics == []
 
 
 def test_model_metric_correction_ignores_technical_tail() -> None:

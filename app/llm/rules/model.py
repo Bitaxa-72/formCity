@@ -41,7 +41,7 @@ RULE: dict[str, object] = {
             },
             PaymentCalendarView.MODEL_RAW_SHEETS.value: {
                 "aliases": ["какие листы", "список листов", "листы модели", "какие таблицы есть в модели"],
-                "meaning": "список raw-листов модели",
+                "meaning": "список листов исходной модели",
             },
             PaymentCalendarView.MODEL_RAW_ROWS.value: {
                 "aliases": [
@@ -59,11 +59,11 @@ RULE: dict[str, object] = {
                     "для консолидации",
                     "лист для консолидации",
                 ],
-                "meaning": "строки выбранного raw-листа модели",
+                "meaning": "строки выбранного листа исходной модели",
             },
             PaymentCalendarView.MODEL_RAW_SEARCH.value: {
                 "aliases": ["найди в модели", "поиск в модели", "найди в финмодели", "найди в остатках"],
-                "meaning": "поиск по безопасным raw-строкам модели",
+                "meaning": "поиск по строкам листа исходной модели",
             },
         },
         "dimensions": {

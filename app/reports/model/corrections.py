@@ -404,6 +404,48 @@ def build_model_raw_rows_correction(
     )
 
 
+def build_model_raw_followup_correction(
+    current_state: dict[str, object],
+    text: str | None,
+) -> LLMParsedResponse | None:
+    if current_state.get("report_type") != "model":
+        return None
+    if current_state.get("view") not in {"model_raw_rows", "model_raw_search"}:
+        return None
+    filters = current_state.get("filters")
+    if not isinstance(filters, dict):
+        return None
+    raw_sheet = filters.get("raw_sheet")
+    if not isinstance(raw_sheet, str) or not raw_sheet:
+        return None
+
+    raw_query = extract_model_raw_query(text)
+    if raw_query is None:
+        return None
+    normalized_text = normalize_model_text(text or "")
+    if not normalized_text or any(marker in normalized_text for marker in MODEL_SUMMARY_MARKERS):
+        return None
+
+    state_delta: dict[str, object] = {
+        "view": "model_raw_search",
+        "metrics": [],
+        "filters": {
+            "raw_sheet": raw_sheet,
+            "raw_query": raw_query,
+        },
+        "group_by": [],
+    }
+    period_label = extract_model_period_label(normalized_text)
+    if period_label:
+        state_delta["period"] = {"label": period_label}
+
+    return LLMParsedResponse(
+        intent=Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(state_delta),
+        confidence=1,
+    )
+
+
 def find_model_metric_keys(text: str | None) -> list[str]:
     normalized_text = normalize_model_text(text or "")
     found = []

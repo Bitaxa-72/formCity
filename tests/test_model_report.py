@@ -577,11 +577,12 @@ def test_model_raw_rows_returns_sheet_hint_instead_of_raw_dump() -> None:
 
     assert query.table == "model_raw_rows"
     assert calculation.rows[0]["raw_sheet"] == "Финмодель"
-    assert "Весь raw-лист Финмодель не вывожу" in draft.text
-    assert "Уточните, что найти:" in draft.text
+    assert 'Лист исходной модели "Финмодель" слишком табличный для полного вывода в чат.' in draft.text
+    assert "Что можно найти на этом листе:" in draft.text
     assert "- общая площадь" in draft.text
     assert "Строка 7. Общая площадь" not in draft.text
     assert "B: 1234" not in draft.text
+    assert "raw" not in draft.text.casefold()
     assert "+79999999999" not in draft.text
 
 
@@ -596,7 +597,7 @@ def test_model_raw_search_filters_rows_and_formats_values() -> None:
         "remains",
         2,
         "Коммерческие помещения",
-        [(1, "A", "Коммерческие помещения", None, False)],
+        [(1, "A", "Коммерческие помещения", None, False), (2, "B", None, Decimal("2070800544.23"), False)],
     )
     add_model_raw_row(
         session,
@@ -622,7 +623,8 @@ def test_model_raw_search_filters_rows_and_formats_values() -> None:
     assert query.params["raw_sheet"] == "remains"
     assert calculation.row_count == 1
     assert "Строка 2. Коммерческие помещения" in draft.text
-    assert "Технически:" in draft.text
+    assert "Суммы по строке: 2 070 800 544.23" in draft.text
+    assert "Технически:" not in draft.text
     assert "Машиноместа" not in draft.text
 
 
@@ -659,5 +661,5 @@ def test_model_raw_search_finds_capitalized_row_label_and_formats_values() -> No
     assert query.params["raw_sheet"] == "financial_model"
     assert calculation.row_count == 1
     assert "Строка 8. Общая площадь" in draft.text
-    assert "Найденные значения: 56279.3; IRR; 0.1046517074" in draft.text
-    assert "Технически: B: Общая площадь | E: 56279.3 | M: IRR | P: 0.1046517074" in draft.text
+    assert "Значения строки: 56 279.3; IRR; 0.1" in draft.text
+    assert "Технически:" not in draft.text

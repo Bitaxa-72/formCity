@@ -109,18 +109,11 @@ MODEL_RAW_SHEET_HINTS = {
 }
 
 
-def model_raw_sheet_label(value: object) -> str:
+def model_raw_sheet_key(value: object) -> str | None:
     if not isinstance(value, str):
-        return "выбранном листе"
+        return None
     normalized = " ".join(value.strip().lower().replace("ё", "е").split())
-    return RAW_SHEET_LABELS.get(normalized, value)
-
-
-def model_raw_sheet_hints(value: object) -> list[str]:
-    if not isinstance(value, str):
-        return []
-    normalized = " ".join(value.strip().lower().replace("ё", "е").split())
-    sheet_key = {
+    return {
         "финмодель": "financial_model",
         "фин модель": "financial_model",
         "финансовая модель": "financial_model",
@@ -140,6 +133,17 @@ def model_raw_sheet_hints(value: object) -> list[str]:
         "newkpi's_план": "newkpi_plan",
         "newkpi план": "newkpi_plan",
     }.get(normalized, normalized)
+
+
+def model_raw_sheet_label(value: object) -> str:
+    if not isinstance(value, str):
+        return "выбранном листе"
+    normalized = " ".join(value.strip().lower().replace("ё", "е").split())
+    return RAW_SHEET_LABELS.get(normalized, value)
+
+
+def model_raw_sheet_hints(value: object) -> list[str]:
+    sheet_key = model_raw_sheet_key(value)
     return MODEL_RAW_SHEET_HINTS.get(sheet_key, [])
 
 
@@ -158,6 +162,23 @@ def parse_raw_values_preview(value: object) -> list[tuple[str, str]]:
     return result
 
 
+def parse_float_text(value: str) -> float | None:
+    normalized = value.strip().replace(" ", "").replace(",", ".")
+    if not normalized:
+        return None
+    try:
+        return float(normalized)
+    except ValueError:
+        return None
+
+
+def format_raw_found_value(value: str) -> str:
+    number = parse_float_text(value)
+    if number is None:
+        return value
+    return format_number(number)
+
+
 def readable_raw_values(row_label: object, values_preview: object, max_items: int = 6) -> list[str]:
     label = str(row_label or "").strip().casefold()
     result = []
@@ -165,11 +186,28 @@ def readable_raw_values(row_label: object, values_preview: object, max_items: in
         normalized = value.strip().casefold()
         if not normalized or normalized == label:
             continue
-        if value not in result:
-            result.append(value)
+        if len(value) > 40 and parse_float_text(value) is None:
+            continue
+        formatted = format_raw_found_value(value)
+        if formatted not in result:
+            result.append(formatted)
         if len(result) >= max_items:
             break
     return result
+
+
+def raw_values_caption(raw_sheet: object, readable_values: list[str]) -> str:
+    if model_raw_sheet_key(raw_sheet) == "remains":
+        numbers = [
+            number
+            for number in (parse_float_text(value) for value in readable_values)
+            if number is not None
+        ]
+        if numbers and max(abs(number) for number in numbers) >= 1_000_000:
+            return "Суммы по строке"
+        if numbers:
+            return "Площади и количества по строке"
+    return "Значения строки"
 
 
 def build_answer_header(response_data: ResponseData) -> list[str]:
@@ -344,10 +382,10 @@ def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
         raw_sheet = filters.get("raw_sheet") if isinstance(filters, dict) else None
         sheet_label = model_raw_sheet_label(raw_sheet)
         hints = model_raw_sheet_hints(raw_sheet)
-        lines.append(f"Весь raw-лист {sheet_label} не вывожу: он технический и нечитаемый.")
+        lines.append(f'Лист исходной модели "{sheet_label}" слишком табличный для полного вывода в чат.')
         if hints:
             lines.append("")
-            lines.append("Уточните, что найти:")
+            lines.append("Что можно найти на этом листе:")
             lines.extend(f"- {item}" for item in hints)
         lines.append("")
         lines.append(f"Пример: модель найди {hints[0] if hints else 'нужный показатель'} в {sheet_label} апрель.")
@@ -371,15 +409,14 @@ def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
             values_preview = row.get("values_preview")
             readable_values = readable_raw_values(row_label, values_preview)
             if readable_values:
-                lines.append(f"Найденные значения: {'; '.join(readable_values)}")
-            if isinstance(values_preview, str) and values_preview.strip():
-                lines.append(f"Технически: {values_preview}")
+                caption = raw_values_caption(raw_sheet if isinstance(filters, dict) else None, readable_values)
+                lines.append(f"{caption}: {'; '.join(readable_values)}")
             lines.append("")
 
         if lines and lines[-1] == "":
             lines.pop()
 
-    if response_data.table.truncated:
+    if response_data.table.truncated and view != "model_raw_rows":
         lines.append("")
         lines.append(f"Показаны первые {len(response_data.table.rows)} из {response_data.table.total_rows} строк.")
 
@@ -468,7 +505,7 @@ def build_model_available_metrics_answer(response_data: ResponseData) -> AnswerD
     lines.append("Подключенные показатели модели:")
     lines.extend(f"- {METRIC_LABELS.get(metric, metric)}" for metric in MODEL_SAFE_METRICS)
     lines.append("")
-    lines.append("Также можно спросить доступные срезы модели, raw-листы модели или безопасные строки raw-листов.")
+    lines.append("Также можно спросить доступные срезы модели, листы исходной модели или поиск по строкам этих листов.")
 
     return AnswerDraft(
         text="\n".join(lines),
