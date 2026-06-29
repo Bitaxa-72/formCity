@@ -15,6 +15,15 @@ ROADMAP_UNSUPPORTED_METRIC_ALIASES = {
     "поступлен": "поступления",
     "этаж": "этажи",
 }
+ROADMAP_SENSITIVE_ALIASES = {
+    "телефон": "телефоны",
+    "телефоны": "телефоны",
+    "контакт": "контакты",
+    "контакты": "контакты",
+    "паспорт": "паспортные данные",
+    "документ": "документы",
+    "договор": "договоры",
+}
 ROADMAP_UNSUPPORTED_METRICS = {
     "plan": "план",
     "fact": "факт",
@@ -33,6 +42,11 @@ ROADMAP_COMPATIBILITY_MESSAGE_TEMPLATE = (
     "Для дорожной карты доступны:\n"
     f"{ROADMAP_AVAILABLE_OPTIONS_TEXT}"
 )
+ROADMAP_SENSITIVE_MESSAGE_TEMPLATE = (
+    'В дорожной карте не вывожу "{metric}" по правилам безопасности.\n\n'
+    "Для дорожной карты доступны:\n"
+    f"{ROADMAP_AVAILABLE_OPTIONS_TEXT}"
+)
 
 ROADMAP_ALLOWED_GROUP_BY = {"row_order", "step", "parent_step", "action", "external", "total", "period_month"}
 
@@ -43,6 +57,17 @@ def find_roadmap_unsupported_metric(text: str | None) -> str | None:
         return None
 
     for alias, label in ROADMAP_UNSUPPORTED_METRIC_ALIASES.items():
+        if alias in normalized:
+            return label
+    return None
+
+
+def find_roadmap_sensitive_alias(text: str | None) -> str | None:
+    normalized = normalize_search_text(text or "")
+    if not normalized:
+        return None
+
+    for alias, label in ROADMAP_SENSITIVE_ALIASES.items():
         if alias in normalized:
             return label
     return None
@@ -69,6 +94,13 @@ def check_roadmap_compatibility(frame: QueryFrame, user_text: str | None) -> Com
 
     unsupported_metric = find_roadmap_unsupported_frame_metric(frame) or find_roadmap_unsupported_metric(user_text)
     if unsupported_metric is None:
+        sensitive_alias = find_roadmap_sensitive_alias(user_text)
+        if sensitive_alias:
+            return CompatibilityCheck(
+                valid=False,
+                error="sensitive_field_not_supported_for_roadmap",
+                message=ROADMAP_SENSITIVE_MESSAGE_TEMPLATE.format(metric=sensitive_alias),
+            )
         return CompatibilityCheck(valid=True)
 
     return CompatibilityCheck(

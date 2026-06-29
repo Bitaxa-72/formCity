@@ -131,3 +131,19 @@ def test_roadmap_compatibility_rejects_plan_metric_from_frame() -> None:
     assert result.valid is False
     assert result.error == "metric_not_supported_for_roadmap"
     assert 'нет показателя "план"' in result.message
+
+
+def test_roadmap_compatibility_rejects_sensitive_request() -> None:
+    frame = apply_report_semantics(build_query_frame(
+        {
+            "report_type": "roadmap",
+            "metrics": ["duration_min"],
+            "period": {"label": "апрель"},
+        },
+    ))
+
+    result = check_roadmap_compatibility(frame, "дорожная карта телефоны участников")
+
+    assert result.valid is False
+    assert result.error == "sensitive_field_not_supported_for_roadmap"
+    assert 'не вывожу "телефоны"' in result.message

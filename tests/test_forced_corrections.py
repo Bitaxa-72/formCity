@@ -271,6 +271,30 @@ def test_roadmap_unsupported_metric_keeps_priority_over_step_filter() -> None:
     assert parsed.state_delta.filters == {}
 
 
+def test_roadmap_deals_stays_in_roadmap_for_compatibility() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "дорожная карта сделки",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "roadmap"
+    assert parsed.state_delta.metrics == ["plan"]
+    assert parsed.state_delta.filters == {}
+
+
+def test_roadmap_sensitive_request_stays_in_roadmap_for_compatibility() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "дорожная карта телефоны участников",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "roadmap"
+    assert parsed.state_delta.metrics == ["duration_min"]
+    assert parsed.state_delta.filters == {}
+
+
 def test_non_roadmap_step_number_does_not_force_roadmap() -> None:
     _state, parsed = build_forced_parsed_response(
         {},

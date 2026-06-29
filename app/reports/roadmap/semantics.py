@@ -54,13 +54,13 @@ def apply_roadmap_view(frame: QueryFrame) -> QueryFrame:
             filters["action_text_contains"] = action_text_contains
         group_by = ROADMAP_ROW_GROUP_BY.copy()
     elif view == "total_duration":
-        for key in ROADMAP_VIEW_FILTERS:
+        for key in ROADMAP_GENERAL_VIEW_FILTERS:
             filters.pop(key, None)
         filters["is_total"] = True
         metrics = ["duration_min", "duration_max"]
         group_by = []
     elif view == "step_count":
-        for key in ROADMAP_VIEW_FILTERS:
+        for key in ROADMAP_GENERAL_VIEW_FILTERS:
             filters.pop(key, None)
         filters["is_total"] = False
         metrics = ["step_count"]

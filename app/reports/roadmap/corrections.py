@@ -9,7 +9,11 @@ from app.pipeline.failed_query import (
     FAILED_QUERY_STATE,
     clear_failed_query_markers,
 )
-from app.reports.roadmap.compatibility import ROADMAP_AVAILABLE_OPTIONS_TEXT, find_roadmap_unsupported_metric
+from app.reports.roadmap.compatibility import (
+    ROADMAP_AVAILABLE_OPTIONS_TEXT,
+    find_roadmap_sensitive_alias,
+    find_roadmap_unsupported_metric,
+)
 
 
 ROADMAP_REPORT_ALIASES = ("дорожная карта", "дорожной карте", "дорожную карту")
@@ -250,6 +254,30 @@ def build_explicit_roadmap_unsupported_metric_correction(text: str | None) -> LL
                 "report_type": "roadmap",
                 "project": "all",
                 "metrics": ["plan"],
+                "filters": {},
+                "group_by": [],
+            },
+        ),
+        confidence=1,
+    )
+
+
+def build_explicit_roadmap_sensitive_correction(text: str | None) -> LLMParsedResponse | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+    if not any(alias in normalized_text for alias in ROADMAP_REPORT_ALIASES):
+        return None
+    if find_roadmap_sensitive_alias(normalized_text) is None:
+        return None
+
+    return LLMParsedResponse(
+        intent=Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(
+            {
+                "report_type": "roadmap",
+                "project": "all",
+                "metrics": ["duration_min"],
                 "filters": {},
                 "group_by": [],
             },
