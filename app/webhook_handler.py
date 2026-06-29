@@ -1051,6 +1051,16 @@ async def process_telegram_webhook(
                 answer_draft,
             )
     if answer_draft is not None:
+        source = response_data.source if response_data is not None else {}
+        if (
+            isinstance(source, dict)
+            and source.get("report_type") == "model"
+            and source.get("view") in MODEL_RAW_VIEWS
+        ):
+            user_session_repository.save_dialog_state(
+                user_session.user.id,
+                jsonable_encoder(preserve_admin_debug_flag(current_state, resolved_state)),
+            )
         await stop_background_task(typing_task)
         stage_started_at = perf_counter()
         telegram_response_status = await send_answer_to_telegram(

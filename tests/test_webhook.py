@@ -2193,6 +2193,55 @@ def test_telegram_webhook_model_raw_sheet_list_without_llm() -> None:
     assert fake_domain_resolver.calls[0].dimension == "raw_sheet"
 
 
+def test_telegram_webhook_model_source_sheet_saves_context_before_answer() -> None:
+    fake_calculation_engine.result = SimpleNamespace(
+        kind="sql_result",
+        rows=[
+            {
+                "raw_sheet": "Остатки",
+                "row_number": 1,
+                "row_label": "Коммерческие помещения",
+                "visible_cells": 1,
+                "values_preview": "A: Коммерческие помещения",
+            },
+        ],
+        row_count=1,
+        metrics=[],
+        columns=["raw_sheet", "row_number", "row_label", "visible_cells", "values_preview"],
+        operation=None,
+    )
+
+    response = client.post(
+        "/webhook/telegram",
+        json={
+            "update_id": 10521,
+            "message": {
+                "message_id": 1051,
+                "date": 1710000000,
+                "chat": {"id": 9361, "type": "private"},
+                "from": {
+                    "id": 1721,
+                    "is_bot": False,
+                    "first_name": "Test",
+                    "username": "tester",
+                },
+                "text": "модель строки листа Остатки апрель",
+            },
+        },
+    )
+
+    body = response.json()
+    first_saved_state = fake_user_session_repository.saved_states[0]["data"]
+
+    assert response.status_code == 200
+    assert body["telegram_response_sent"] is True
+    assert len(fake_user_session_repository.saved_states) >= 2
+    assert first_saved_state["report_type"] == "model"
+    assert first_saved_state["view"] == "model_raw_rows"
+    assert first_saved_state["filters"] == {"raw_sheet": "remains"}
+    assert first_saved_state["period"]["label"] == "апрель"
+
+
 def test_telegram_webhook_model_financial_model_uses_summary_without_llm() -> None:
     fake_calculation_engine.result = SimpleNamespace(
         kind="sql_result",
