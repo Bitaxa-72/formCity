@@ -2735,7 +2735,7 @@ def test_telegram_webhook_handles_dimension_clarification_answer() -> None:
     assert "Статьи:" in fake_telegram_client.messages[0][1]
 
 
-def test_telegram_webhook_does_not_save_missing_article_filter() -> None:
+def test_telegram_webhook_saves_missing_article_failed_context() -> None:
     fake_domain_resolver.valid = False
     fake_domain_resolver.errors = ["article_not_found"]
     fake_domain_resolver.clarification_question = "Не нашел такую статью в платежном календаре."
@@ -2778,9 +2778,13 @@ def test_telegram_webhook_does_not_save_missing_article_filter() -> None:
     assert body["domain_errors"] == ["article_not_found"]
     assert body["telegram_response_sent"] is True
     assert saved_state["awaiting_clarification"] is False
-    assert saved_state["filters"] == {}
+    assert saved_state[CONTEXT_BLOCKED_AFTER_ERROR] is True
+    assert saved_state[FAILED_QUERY_ERROR] == "article_not_found"
+    assert saved_state[FAILED_QUERY_STATE]["filters"] == {"article": "рекламе"}
+    assert saved_state["filters"] == {"article": "рекламе"}
     assert saved_state["report_type"] == "payment_calendar"
     assert saved_state["project"] == "obvodny"
+    assert saved_state["pending_action"] == PENDING_SHOW_AVAILABLE_ARTICLES
     assert fake_calculation_engine.calls == []
 
 

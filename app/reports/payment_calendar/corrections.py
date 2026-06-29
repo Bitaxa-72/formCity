@@ -469,3 +469,73 @@ def build_failed_metric_correction(
         confidence=1,
     )
     return corrected_state, parsed_response
+
+
+def is_payment_calendar_article_reset_request(text: str | None) -> bool:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return False
+    return any(
+        marker in normalized_text
+        for marker in (
+            "без статьи",
+            "без фильтра",
+            "в целом",
+            "общий",
+            "итоги",
+            "по всем статьям",
+        )
+    )
+
+
+def build_failed_article_correction(
+    state: dict[str, object] | None,
+    text: str | None,
+) -> tuple[dict[str, object], LLMParsedResponse] | None:
+    if not state or state.get(CONTEXT_BLOCKED_AFTER_ERROR) is not True:
+        return None
+    if state.get(FAILED_QUERY_ERROR) != "article_not_found":
+        return None
+
+    failed_state = state.get(FAILED_QUERY_STATE)
+    if not isinstance(failed_state, dict):
+        return None
+
+    period_label = resolve_payment_calendar_period_label(text)
+    project = resolve_payment_calendar_project(text)
+    reset_article = is_payment_calendar_article_reset_request(text)
+    if period_label is None and project is None and not reset_article:
+        return None
+
+    corrected_state = dict(failed_state)
+    delta_data: dict[str, object] = {}
+    if period_label is not None:
+        period = {"label": period_label}
+        corrected_state["period"] = period
+        delta_data["period"] = period
+    if project is not None:
+        corrected_state["project"] = project
+        delta_data["project"] = project
+    if reset_article:
+        filters = dict(corrected_state.get("filters") or {})
+        filters.pop("article", None)
+        corrected_state["filters"] = filters
+        delta_data["filters"] = filters
+
+    corrected_state["awaiting_clarification"] = False
+    corrected_state["clarification_target"] = None
+    corrected_state["clarification_base_state"] = None
+    corrected_state["clarification_kind"] = None
+    corrected_state["clarification_options"] = []
+    corrected_state.pop("pending_action", None)
+    corrected_state.pop("pending_payload", None)
+    corrected_state = clear_failed_query_markers(corrected_state)
+
+    if corrected_state.get("metrics"):
+        delta_data["metrics"] = corrected_state["metrics"]
+    parsed_response = LLMParsedResponse(
+        intent=Intent.DATA_QUERY,
+        state_delta=StateDelta.model_validate(delta_data),
+        confidence=1,
+    )
+    return corrected_state, parsed_response

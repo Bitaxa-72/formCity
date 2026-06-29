@@ -16,6 +16,7 @@ from app.reports.model.corrections import (
 )
 from app.reports.payment_calendar.corrections import (
     build_article_filter_request_correction,
+    build_failed_article_correction,
     build_failed_group_by_correction,
     build_failed_metric_correction,
     build_payment_calendar_view_correction,
@@ -68,6 +69,7 @@ def build_forced_parsed_response(
     )
     failed_group_by_correction = build_failed_group_by_correction(current_state, text)
     failed_metric_correction = build_failed_metric_correction(current_state, text)
+    failed_article_correction = build_failed_article_correction(current_state, text)
     explicit_roadmap_unsupported_metric_correction = build_explicit_roadmap_unsupported_metric_correction(text)
     failed_roadmap_correction = build_failed_roadmap_correction(current_state, text)
     roadmap_context_correction = build_roadmap_context_correction(current_state, text)
@@ -126,6 +128,8 @@ def build_forced_parsed_response(
         current_state, forced_parsed_response = failed_group_by_correction
     elif failed_metric_correction is not None:
         current_state, forced_parsed_response = failed_metric_correction
+    elif failed_article_correction is not None:
+        current_state, forced_parsed_response = failed_article_correction
     elif explicit_roadmap_unsupported_metric_correction is not None:
         forced_parsed_response = explicit_roadmap_unsupported_metric_correction
     elif failed_roadmap_correction is not None:

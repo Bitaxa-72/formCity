@@ -646,8 +646,10 @@ async def process_telegram_webhook(
             state_to_save = dict(resolved_state)
             filters = dict(state_to_save.get("filters") or {})
             missing_article = filters.get("article")
-            filters.pop("article", None)
             state_to_save["filters"] = filters
+            state_to_save[CONTEXT_BLOCKED_AFTER_ERROR] = True
+            state_to_save[FAILED_QUERY_ERROR] = "article_not_found"
+            state_to_save[FAILED_QUERY_STATE] = jsonable_encoder(build_failed_query_state(current_state, resolved_state, "article_not_found"))
             state_to_save["awaiting_clarification"] = False
             state_to_save["clarification_target"] = None
             state_to_save["clarification_base_state"] = None

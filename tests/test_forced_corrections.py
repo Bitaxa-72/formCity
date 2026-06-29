@@ -310,3 +310,53 @@ def test_payment_calendar_failed_metric_correction_keeps_failed_project_and_peri
     assert state["period"] == {"from": "2026-05-01", "to": "2026-05-31", "label": "май 2026"}
     assert parsed.state_delta.view == "income"
     assert parsed.state_delta.filters == {}
+
+
+def test_payment_calendar_failed_article_correction_keeps_article_when_period_changes() -> None:
+    state, parsed = build_forced_parsed_response(
+        {
+            CONTEXT_BLOCKED_AFTER_ERROR: True,
+            FAILED_QUERY_ERROR: "article_not_found",
+            FAILED_QUERY_STATE: {
+                "report_type": "payment_calendar",
+                "project": "obvodny",
+                "period": {"from": "2026-04-01", "to": "2026-04-30", "label": "апрель 2026"},
+                "metrics": ["deviation"],
+                "filters": {"article": "Реклама"},
+                "group_by": [],
+            },
+            "pending_action": "show_available_articles",
+            "pending_payload": {},
+        },
+        "февраль",
+    )
+
+    assert parsed is not None
+    assert state["project"] == "obvodny"
+    assert state["period"] == {"label": "февраль"}
+    assert state["filters"] == {"article": "Реклама"}
+    assert parsed.state_delta.period.label == "февраль"
+    assert parsed.state_delta.metrics == ["deviation"]
+    assert "pending_action" not in state
+
+
+def test_payment_calendar_failed_article_correction_can_reset_article() -> None:
+    state, parsed = build_forced_parsed_response(
+        {
+            CONTEXT_BLOCKED_AFTER_ERROR: True,
+            FAILED_QUERY_ERROR: "article_not_found",
+            FAILED_QUERY_STATE: {
+                "report_type": "payment_calendar",
+                "project": "obvodny",
+                "period": {"from": "2026-04-01", "to": "2026-04-30", "label": "апрель 2026"},
+                "metrics": ["deviation"],
+                "filters": {"article": "Реклама"},
+                "group_by": [],
+            },
+        },
+        "в целом",
+    )
+
+    assert parsed is not None
+    assert state["filters"] == {}
+    assert parsed.state_delta.filters == {}
