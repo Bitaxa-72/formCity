@@ -1,3 +1,5 @@
+import re
+
 from app.llm.answer_labels import *
 
 
@@ -235,11 +237,34 @@ def clean_model_raw_header(value: str) -> str:
     return header
 
 
+def normalize_model_raw_match_text(value: object) -> str:
+    text = clean_model_raw_label(value).casefold().replace("ё", "е")
+    text = re.sub(r"[^0-9a-zа-я]+", " ", text)
+    return " ".join(text.split())
+
+
+def is_model_raw_date_text(value: str) -> bool:
+    return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:t\d{2}:\d{2}:\d{2})?", value.strip().casefold()))
+
+
+def is_usable_model_raw_header(value: str, row_label: object) -> bool:
+    header = clean_model_raw_header(value)
+    if not header:
+        return False
+    if header.casefold() == str(row_label or "").strip().casefold():
+        return False
+    if is_model_raw_date_text(header):
+        return False
+    if parse_float_text(header) is not None:
+        return False
+    return True
+
+
 def infer_model_raw_unit(raw_sheet: object, row_label: object, values: list[tuple[str, str]]) -> str | None:
     label = str(row_label or "").casefold()
     if "млн" in label and "руб" in label:
         return "million_rub"
-    if "м2" in label or "м²" in label:
+    if "м2" in label or "м²" in label or "площад" in label:
         return "sqm"
     if "руб" in label:
         return "rub"
@@ -281,6 +306,7 @@ def build_model_raw_value_lines(
     headers = dict(parse_raw_values_preview(header_preview))
     label = str(row_label or "").strip().casefold()
     unit = infer_model_raw_unit(raw_sheet, row_label, values)
+    sheet_key = model_raw_sheet_key(raw_sheet)
     result = []
     seen = set()
     for index, (column, value) in enumerate(values, start=1):
@@ -289,9 +315,21 @@ def build_model_raw_value_lines(
             continue
         if len(value) > 40 and parse_float_text(value) is None:
             continue
-        header = clean_model_raw_header(headers.get(column, ""))
-        if not header or header.casefold() == label:
-            header = f"Значение {index}"
+        number = parse_float_text(value)
+        if sheet_key in {"financial_model", "consolidation"} and number is None:
+            continue
+        header_value = headers.get(column, "")
+        header = clean_model_raw_header(header_value) if is_usable_model_raw_header(header_value, row_label) else ""
+        if not header:
+            if sheet_key == "financial_model" and number is not None:
+                line = f"- {format_model_raw_value(value, unit)}"
+                if line not in seen:
+                    result.append(line)
+                    seen.add(line)
+                break
+            if sheet_key == "remains":
+                continue
+            continue
         formatted = format_model_raw_value(value, unit)
         line = f"- {header}: {formatted}"
         if line in seen:
@@ -301,6 +339,35 @@ def build_model_raw_value_lines(
         if len(result) >= max_items:
             break
     return result
+
+
+def filter_model_raw_rows_for_query(rows: list[dict[str, object]], raw_query: object) -> list[dict[str, object]]:
+    if not isinstance(raw_query, str) or not raw_query.strip():
+        return rows
+    query = normalize_model_raw_match_text(raw_query)
+    if not query:
+        return rows
+    exact_rows = [
+        row for row in rows if normalize_model_raw_match_text(row.get("row_label")) == query
+    ]
+    if exact_rows:
+        return exact_rows
+    label_rows = [
+        row for row in rows if query in normalize_model_raw_match_text(row.get("row_label"))
+    ]
+    if label_rows:
+        return label_rows[:5]
+    return rows[:5]
+
+
+def model_raw_unit_title(unit: str | None) -> str:
+    if unit == "million_rub":
+        return "сумма"
+    if unit == "rub":
+        return "сумма"
+    if unit == "sqm":
+        return "площадь"
+    return "данные"
 
 
 def build_answer_header(response_data: ResponseData) -> list[str]:
@@ -494,14 +561,20 @@ def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
             if raw_sheet or raw_query:
                 lines.append("")
 
-        for row in response_data.table.rows:
+        rows = filter_model_raw_rows_for_query(
+            response_data.table.rows,
+            raw_query if isinstance(filters, dict) else None,
+        )
+        title_counts: dict[str, int] = {}
+        for row in rows:
+            title = clean_model_raw_label(row.get("row_label") or "без названия")
+            title_counts[title.casefold()] = title_counts.get(title.casefold(), 0) + 1
+
+        rendered_rows = 0
+        for row in rows:
             row_number = row.get("row_number")
             row_label = row.get("row_label") or "без названия"
             title = clean_model_raw_label(row_label)
-            if row_number is not None:
-                lines.append(f"{title}:")
-            else:
-                lines.append(f"{title}:")
             values_preview = row.get("values_preview")
             header_preview = row.get("header_preview")
             readable_values = build_model_raw_value_lines(
@@ -510,14 +583,27 @@ def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
                 values_preview,
                 header_preview,
             )
-            if readable_values:
-                lines.extend(readable_values)
-            elif row_number is not None:
-                lines[-1] = f"Строка {format_number(row_number)}. {row_label}"
+            if not readable_values:
+                continue
+            unit = infer_model_raw_unit(
+                raw_sheet if isinstance(filters, dict) else None,
+                row_label,
+                parse_raw_values_preview(values_preview),
+            )
+            if title_counts.get(title.casefold(), 0) > 1:
+                title = f"{title} ({model_raw_unit_title(unit)})"
+            lines.append(f"{title}:")
+            lines.extend(readable_values)
             lines.append("")
+            rendered_rows += 1
 
         if lines and lines[-1] == "":
             lines.pop()
+        if rendered_rows == 0:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append("Нашел совпадение в исходном листе, но не смог собрать понятные числовые значения для ответа.")
+            lines.append("Уточните показатель или спросите список того, что можно найти на этом листе.")
 
     if response_data.table.truncated and view != "model_raw_rows":
         lines.append("")

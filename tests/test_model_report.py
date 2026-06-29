@@ -736,8 +736,89 @@ def test_model_raw_search_finds_capitalized_row_label_and_formats_values() -> No
     assert query.params["raw_sheet"] == "financial_model"
     assert calculation.row_count == 1
     assert "Общая площадь:" in draft.text
-    assert "- Значение 2: 56 279.3" in draft.text
-    assert "- Значение 3: IRR" in draft.text
-    assert "- Значение 4: 0.1" in draft.text
+    assert "- 56 279.3 м2" in draft.text
+    assert "IRR" not in draft.text
+    assert "0.1" not in draft.text
     assert "Строка 8. Общая площадь" not in draft.text
     assert "Технически:" not in draft.text
+
+
+def test_model_raw_search_prefers_exact_row_label_match() -> None:
+    session = create_session()
+    add_model_source(session, date(2026, 4, 1))
+    add_model_raw_sheet(session, date(2026, 4, 1), "Остатки", "remains", 12, 20)
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Остатки",
+        "remains",
+        3,
+        "ВСЕГО",
+        [(10, "J", "ВСЕГО", None, False), (11, "K", "ИСПОЛНЕНО", None, False)],
+    )
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Остатки",
+        "remains",
+        18,
+        "СМР",
+        [(9, "I", "СМР", None, False), (10, "J", "-3188350000", None, False), (11, "K", "-3187840000", None, False)],
+    )
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Остатки",
+        "remains",
+        19,
+        "Сублимит 5 (СМР)",
+        [(9, "I", "Сублимит 5 (СМР)", None, False), (10, "J", "116000000", None, False)],
+    )
+    session.commit()
+
+    draft, calculation, query = build_model_answer(
+        session,
+        {
+            "last_intent": "data_query",
+            "report_type": "model",
+            "view": "model_raw_search",
+            "filters": {"raw_sheet": "остатки", "raw_query": "смр"},
+        },
+    )
+
+    assert query.params["raw_sheet"] == "remains"
+    assert calculation.row_count == 2
+    assert "СМР:" in draft.text
+    assert "- Всего: -3 188.35 млн руб." in draft.text
+    assert "Сублимит 5" not in draft.text
+
+
+def test_model_raw_search_does_not_emit_unclear_text_only_rows() -> None:
+    session = create_session()
+    add_model_source(session, date(2026, 4, 1))
+    add_model_raw_sheet(session, date(2026, 4, 1), "Для консолидации", "consolidation", 12, 20)
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Для консолидации",
+        "consolidation",
+        3,
+        "ТЭП проекта в кв. м",
+        [(2, "B", "ТЭП проекта в кв. м", None, False), (7, "G", "Основные реперные даты", None, False)],
+    )
+    session.commit()
+
+    draft, calculation, query = build_model_answer(
+        session,
+        {
+            "last_intent": "data_query",
+            "report_type": "model",
+            "view": "model_raw_search",
+            "filters": {"raw_sheet": "для консолидации", "raw_query": "тэп"},
+        },
+    )
+
+    assert query.params["raw_sheet"] == "consolidation"
+    assert calculation.row_count == 1
+    assert "Основные реперные даты" not in draft.text
+    assert "не смог собрать понятные числовые значения" in draft.text
