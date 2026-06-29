@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from io import BytesIO
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from app.core.access import UNAUTHORIZED_ACCESS_MESSAGE
 from app.bot.commands import (
@@ -47,6 +49,7 @@ from app.pipeline.report_compatibility import (
     PAYMENT_CALENDAR_GROUP_BY_COMPATIBILITY_MESSAGE_TEMPLATE,
     build_payment_calendar_compatibility_message,
 )
+from app.pipeline.spreadsheet_report import XLSX_MIME_TYPE, XLSX_REPORT_NOTICE
 
 
 class FakeTelegramClient:
@@ -62,7 +65,14 @@ class FakeTelegramClient:
             raise RuntimeError("Telegram send failed")
         self.messages.append((chat_id, text))
 
-    async def send_document(self, chat_id: int, file_bytes: bytes, filename: str, caption: str | None = None) -> None:
+    async def send_document(
+        self,
+        chat_id: int,
+        file_bytes: bytes,
+        filename: str,
+        caption: str | None = None,
+        mime_type: str = "application/pdf",
+    ) -> None:
         if self.raise_on_send:
             raise RuntimeError("Telegram send failed")
         self.documents.append(
@@ -71,6 +81,7 @@ class FakeTelegramClient:
                 "file_bytes": file_bytes,
                 "filename": filename,
                 "caption": caption,
+                "mime_type": mime_type,
             },
         )
 
@@ -2186,6 +2197,24 @@ def test_telegram_webhook_model_raw_sheet_list_without_llm() -> None:
 
 
 def test_telegram_webhook_model_raw_rows_without_llm() -> None:
+    fake_calculation_engine.result = SimpleNamespace(
+        kind="sql_result",
+        rows=[
+            {
+                "raw_sheet": "Финмодель",
+                "row_number": row_number,
+                "row_label": f"Строка {row_number}",
+                "visible_cells": 3,
+                "values_preview": f"B: Строка {row_number} | E: {row_number} | M: показатель",
+            }
+            for row_number in range(1, 32)
+        ],
+        row_count=31,
+        metrics=[],
+        columns=["raw_sheet", "row_number", "row_label", "visible_cells", "values_preview"],
+        operation=None,
+    )
+
     response = client.post(
         "/webhook/telegram",
         json={
@@ -2214,6 +2243,18 @@ def test_telegram_webhook_model_raw_rows_without_llm() -> None:
     assert fake_domain_resolver.calls[0].view == "model_raw_rows"
     assert fake_domain_resolver.calls[0].filters == {"raw_sheet": "financial_model"}
     assert fake_domain_resolver.calls[0].period.label == "апрель"
+    assert fake_llm_answerer.calls == []
+    assert fake_telegram_client.messages == [(9361, XLSX_REPORT_NOTICE)]
+    assert len(fake_telegram_client.documents) == 1
+    document = fake_telegram_client.documents[0]
+    assert document["filename"] == "model.xlsx"
+    assert document["caption"] == "Готовый отчет в XLSX."
+    assert document["mime_type"] == XLSX_MIME_TYPE
+    workbook = load_workbook(BytesIO(document["file_bytes"]))
+    worksheet = workbook.active
+    assert worksheet.cell(row=1, column=1).value == "Лист"
+    assert worksheet.cell(row=1, column=5).value == "B"
+    assert worksheet.cell(row=2, column=3).value == "Строка 1"
 
 
 def test_telegram_webhook_model_short_metric_context_replaces_metric_without_llm() -> None:

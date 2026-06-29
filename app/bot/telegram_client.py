@@ -22,7 +22,14 @@ class TelegramClient:
             )
             response.raise_for_status()
 
-    async def send_document(self, chat_id: int, file_bytes: bytes, filename: str, caption: str | None = None) -> None:
+    async def send_document(
+        self,
+        chat_id: int,
+        file_bytes: bytes,
+        filename: str,
+        caption: str | None = None,
+        mime_type: str = "application/pdf",
+    ) -> None:
         if not self.bot_token:
             raise RuntimeError("BOT_TOKEN is not configured")
 
@@ -30,7 +37,7 @@ class TelegramClient:
         data = {"chat_id": str(chat_id)}
         if caption:
             data["caption"] = caption
-        files = {"document": (filename, file_bytes, "application/pdf")}
+        files = {"document": (filename, file_bytes, mime_type)}
         async with httpx.AsyncClient(timeout=30, proxy=self.proxy) as client:
             response = await client.post(url, data=data, files=files)
             response.raise_for_status()
