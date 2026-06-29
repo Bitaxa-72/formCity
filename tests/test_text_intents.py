@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.pipeline.guarded_requests import (
@@ -6,7 +8,7 @@ from app.pipeline.guarded_requests import (
     TECHNICAL_DISCLOSURE_BLOCK_MESSAGE,
     detect_guarded_non_data_request,
 )
-from app.pipeline.text_intents import is_capabilities_question
+from app.pipeline.text_intents import is_capabilities_question, should_skip_pdf_report
 
 
 @pytest.mark.parametrize(
@@ -76,3 +78,12 @@ def test_guarded_floor_question_without_stock_context_stays_out_of_scope() -> No
         "сколько этажей?",
         current_state={"report_type": "payment_calendar"},
     ) == OUT_OF_SCOPE_BLOCK_MESSAGE
+
+
+@pytest.mark.parametrize("view", ["model_raw_rows", "model_raw_search", "model_available_metrics"])
+def test_model_technical_views_skip_pdf_report(view: str) -> None:
+    assert should_skip_pdf_report(SimpleNamespace(source={"report_type": "model", "view": view})) is True
+
+
+def test_regular_report_does_not_skip_pdf_report() -> None:
+    assert should_skip_pdf_report(SimpleNamespace(source={"report_type": "payment_calendar", "view": "details"})) is False

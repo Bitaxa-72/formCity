@@ -95,6 +95,83 @@ def format_filter_subject(source: dict[str, object]) -> str:
     return ""
 
 
+MODEL_RAW_SHEET_HINTS = {
+    "financial_model": ["ТЭПы", "общая площадь", "полезная площадь", "даты", "IRR", "ROE", "NPV"],
+    "remains": ["выручка", "продажи м2", "ПИР", "СМР", "коммерческие помещения"],
+    "consolidation": ["ТЭП", "поступления", "СМР итого", "приобретение прав на ЗУ", "соцнагрузка"],
+    "rates": ["ставка до РНС", "ставка после РНС", "ключевая ставка", "сублимиты", "погашение после эскроу"],
+    "passport": ["этажи", "общая площадь", "полезная площадь", "продаваемая площадь", "описание проекта"],
+    "comparison": ["выручка", "себестоимость", "ПИР", "СМР", "чистая прибыль", "NPV"],
+    "fm": ["поступления", "СМР", "выручка", "расходы", "денежный поток"],
+    "fm_plan": ["план поступлений", "план СМР", "план выручки", "план расходов"],
+    "newkpi": ["выручка", "поступления", "себестоимость", "СМР", "чистая прибыль", "NPV"],
+    "newkpi_plan": ["плановая выручка", "плановая себестоимость", "плановая чистая прибыль", "NPV"],
+}
+
+
+def model_raw_sheet_label(value: object) -> str:
+    if not isinstance(value, str):
+        return "выбранном листе"
+    normalized = " ".join(value.strip().lower().replace("ё", "е").split())
+    return RAW_SHEET_LABELS.get(normalized, value)
+
+
+def model_raw_sheet_hints(value: object) -> list[str]:
+    if not isinstance(value, str):
+        return []
+    normalized = " ".join(value.strip().lower().replace("ё", "е").split())
+    sheet_key = {
+        "финмодель": "financial_model",
+        "фин модель": "financial_model",
+        "финансовая модель": "financial_model",
+        "остатки": "remains",
+        "остаток": "remains",
+        "для консолидации": "consolidation",
+        "консолидация": "consolidation",
+        "проценты": "rates",
+        "паспорт": "passport",
+        "сравнение": "comparison",
+        "фм_": "fm",
+        "фм": "fm",
+        "фм_план": "fm_plan",
+        "фм план": "fm_plan",
+        "newkpi's_": "newkpi",
+        "newkpi": "newkpi",
+        "newkpi's_план": "newkpi_plan",
+        "newkpi план": "newkpi_plan",
+    }.get(normalized, normalized)
+    return MODEL_RAW_SHEET_HINTS.get(sheet_key, [])
+
+
+def parse_raw_values_preview(value: object) -> list[tuple[str, str]]:
+    if not isinstance(value, str):
+        return []
+    result = []
+    for item in value.split(" | "):
+        if ": " not in item:
+            continue
+        column, cell_value = item.split(": ", 1)
+        column = column.strip()
+        cell_value = cell_value.strip()
+        if column and cell_value:
+            result.append((column, cell_value))
+    return result
+
+
+def readable_raw_values(row_label: object, values_preview: object, max_items: int = 6) -> list[str]:
+    label = str(row_label or "").strip().casefold()
+    result = []
+    for _, value in parse_raw_values_preview(values_preview):
+        normalized = value.strip().casefold()
+        if not normalized or normalized == label:
+            continue
+        if value not in result:
+            result.append(value)
+        if len(result) >= max_items:
+            break
+    return result
+
+
 def build_answer_header(response_data: ResponseData) -> list[str]:
     source = response_data.source
     report_type = source.get("report_type")
@@ -262,6 +339,18 @@ def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
                 details.append(f"ячеек: {format_number(cell_count)}")
             suffix = f" ({', '.join(details)})" if details else ""
             lines.append(f"- {sheet}{suffix}")
+    elif view == "model_raw_rows":
+        filters = response_data.source.get("filters")
+        raw_sheet = filters.get("raw_sheet") if isinstance(filters, dict) else None
+        sheet_label = model_raw_sheet_label(raw_sheet)
+        hints = model_raw_sheet_hints(raw_sheet)
+        lines.append(f"Весь raw-лист {sheet_label} не вывожу: он технический и нечитаемый.")
+        if hints:
+            lines.append("")
+            lines.append("Уточните, что найти:")
+            lines.extend(f"- {item}" for item in hints)
+        lines.append("")
+        lines.append(f"Пример: модель найди {hints[0] if hints else 'нужный показатель'} в {sheet_label} апрель.")
     else:
         filters = response_data.source.get("filters")
         if isinstance(filters, dict):
@@ -280,8 +369,11 @@ def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
             prefix = f"Строка {format_number(row_number)}" if row_number is not None else "Строка"
             lines.append(f"{prefix}. {row_label}")
             values_preview = row.get("values_preview")
+            readable_values = readable_raw_values(row_label, values_preview)
+            if readable_values:
+                lines.append(f"Найденные значения: {'; '.join(readable_values)}")
             if isinstance(values_preview, str) and values_preview.strip():
-                lines.append(f"Значения: {values_preview}")
+                lines.append(f"Технически: {values_preview}")
             lines.append("")
 
         if lines and lines[-1] == "":

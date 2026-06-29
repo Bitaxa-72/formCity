@@ -546,7 +546,7 @@ def test_model_raw_sheet_dimension_without_view_uses_raw_sheet_list() -> None:
     assert "Листы модели:" in draft.text
 
 
-def test_model_raw_rows_return_visible_cells_only() -> None:
+def test_model_raw_rows_returns_sheet_hint_instead_of_raw_dump() -> None:
     session = create_session()
     add_model_source(session, date(2026, 4, 1))
     add_model_raw_sheet(session, date(2026, 4, 1), "Финмодель", "financial_model", 10, 20)
@@ -577,12 +577,15 @@ def test_model_raw_rows_return_visible_cells_only() -> None:
 
     assert query.table == "model_raw_rows"
     assert calculation.rows[0]["raw_sheet"] == "Финмодель"
-    assert "Строка 7. Общая площадь" in draft.text
-    assert "B: 1234" in draft.text
+    assert "Весь raw-лист Финмодель не вывожу" in draft.text
+    assert "Уточните, что найти:" in draft.text
+    assert "- общая площадь" in draft.text
+    assert "Строка 7. Общая площадь" not in draft.text
+    assert "B: 1234" not in draft.text
     assert "+79999999999" not in draft.text
 
 
-def test_model_raw_search_filters_rows() -> None:
+def test_model_raw_search_filters_rows_and_formats_values() -> None:
     session = create_session()
     add_model_source(session, date(2026, 4, 1))
     add_model_raw_sheet(session, date(2026, 4, 1), "Остатки", "remains", 10, 20)
@@ -612,11 +615,49 @@ def test_model_raw_search_filters_rows() -> None:
             "last_intent": "data_query",
             "report_type": "model",
             "view": "model_raw_search",
-            "filters": {"raw_sheet": "остатки", "raw_query": "Коммерческие"},
+            "filters": {"raw_sheet": "остатки", "raw_query": "коммерческие"},
         },
     )
 
     assert query.params["raw_sheet"] == "remains"
     assert calculation.row_count == 1
-    assert "Коммерческие помещения" in draft.text
+    assert "Строка 2. Коммерческие помещения" in draft.text
+    assert "Технически:" in draft.text
     assert "Машиноместа" not in draft.text
+
+
+def test_model_raw_search_finds_capitalized_row_label_and_formats_values() -> None:
+    session = create_session()
+    add_model_source(session, date(2026, 4, 1))
+    add_model_raw_sheet(session, date(2026, 4, 1), "Финмодель", "financial_model", 10, 20)
+    add_model_raw_row(
+        session,
+        date(2026, 4, 1),
+        "Финмодель",
+        "financial_model",
+        8,
+        "Общая площадь",
+        [
+            (2, "B", "Общая площадь", None, False),
+            (5, "E", None, Decimal("56279.3"), False),
+            (13, "M", "IRR", None, False),
+            (16, "P", None, Decimal("0.1046517074"), False),
+        ],
+    )
+    session.commit()
+
+    draft, calculation, query = build_model_answer(
+        session,
+        {
+            "last_intent": "data_query",
+            "report_type": "model",
+            "view": "model_raw_search",
+            "filters": {"raw_sheet": "финмодель", "raw_query": "общая площадь"},
+        },
+    )
+
+    assert query.params["raw_sheet"] == "financial_model"
+    assert calculation.row_count == 1
+    assert "Строка 8. Общая площадь" in draft.text
+    assert "Найденные значения: 56279.3; IRR; 0.1046517074" in draft.text
+    assert "Технически: B: Общая площадь | E: 56279.3 | M: IRR | P: 0.1046517074" in draft.text

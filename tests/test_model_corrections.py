@@ -100,6 +100,18 @@ def test_build_model_raw_search_correction_extracts_query() -> None:
     assert correction.state_delta.period.label == "апрель"
 
 
+def test_build_model_raw_search_correction_strips_finmodel_sheet_alias_from_query() -> None:
+    correction = build_model_raw_rows_correction("модель найди общая площадь в финмодели апрель")
+
+    assert correction is not None
+    assert correction.intent == "data_query"
+    assert correction.state_delta.report_type == "model"
+    assert correction.state_delta.view == "model_raw_search"
+    assert correction.state_delta.filters == {"raw_sheet": "financial_model", "raw_query": "общая площадь"}
+    assert correction.state_delta.period is not None
+    assert correction.state_delta.period.label == "апрель"
+
+
 def test_model_metric_correction_ignores_technical_tail() -> None:
     correction = build_model_metric_correction("верни json по модели NPV апрель")
 

@@ -45,7 +45,11 @@ def is_capabilities_question(text: str | None) -> bool:
 
 def should_skip_pdf_report(response_data: object) -> bool:
     source = getattr(response_data, "source", None)
-    return isinstance(source, dict) and source.get("report_type") == "model" and source.get("view") == "model_available_metrics"
+    return (
+        isinstance(source, dict)
+        and source.get("report_type") == "model"
+        and source.get("view") in {"model_available_metrics", "model_raw_rows", "model_raw_search"}
+    )
 
 
 def is_vague_followup_question(text: str | None) -> bool:

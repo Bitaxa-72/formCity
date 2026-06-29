@@ -106,23 +106,41 @@ def compile_model_raw_rows_sql(frame: QueryFrame) -> SQLQuery:
 
     raw_query = frame.filters.get("raw_query")
     if isinstance(raw_query, str) and raw_query.strip():
-        where_parts.append(
-            "(\n"
-            "    r.row_label LIKE :raw_query\n"
-            "    OR EXISTS (\n"
-            "      SELECT 1\n"
-            "      FROM model_raw_cells sc\n"
-            "      WHERE sc.project = r.project\n"
-            "        AND sc.snapshot_month = r.snapshot_month\n"
-            "        AND sc.source_file = r.source_file\n"
-            "        AND sc.sheet_name = r.sheet_name\n"
-            "        AND sc.row_number = r.row_number\n"
-            "        AND sc.is_sensitive = 0\n"
-            "        AND sc.value_text LIKE :raw_query\n"
-            "    )\n"
-            "  )",
+        raw_query_text = raw_query.strip()
+        raw_query_variants = list(
+            dict.fromkeys(
+                [
+                    raw_query_text,
+                    raw_query_text.casefold(),
+                    raw_query_text.lower(),
+                    raw_query_text.upper(),
+                    raw_query_text.capitalize(),
+                ],
+            ),
         )
-        params["raw_query"] = f"%{raw_query.strip()}%"
+        raw_query_conditions = []
+        for index, _ in enumerate(raw_query_variants):
+            param_name = f"raw_query_{index}"
+            raw_query_conditions.append(
+                "(\n"
+                f"    r.row_label LIKE :{param_name}\n"
+                "    OR EXISTS (\n"
+                "      SELECT 1\n"
+                "      FROM model_raw_cells sc\n"
+                "      WHERE sc.project = r.project\n"
+                "        AND sc.snapshot_month = r.snapshot_month\n"
+                "        AND sc.source_file = r.source_file\n"
+                "        AND sc.sheet_name = r.sheet_name\n"
+                "        AND sc.row_number = r.row_number\n"
+                "        AND sc.is_sensitive = 0\n"
+                f"        AND sc.value_text LIKE :{param_name}\n"
+                "    )\n"
+                "  )",
+            )
+            params[param_name] = f"%{raw_query_variants[index]}%"
+        where_parts.append(
+            "(" + "\n  OR ".join(raw_query_conditions) + ")",
+        )
 
     where_sql = "\nWHERE " + "\n  AND ".join(where_parts)
     return SQLQuery(
