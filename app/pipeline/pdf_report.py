@@ -5,7 +5,7 @@ from typing import Any
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -197,6 +197,43 @@ def column_label(column: str) -> str:
     return COLUMN_LABELS.get(column, column)
 
 
+def excel_column_index(column: str) -> int:
+    result = 0
+    for char in column.upper():
+        if not ("A" <= char <= "Z"):
+            return 10_000
+        result = result * 26 + ord(char) - ord("A") + 1
+    return result
+
+
+def split_long_token(value: str, chunk_size: int = 36) -> str:
+    parts = []
+    for token in value.split(" "):
+        if len(token) <= chunk_size:
+            parts.append(token)
+            continue
+        parts.extend(token[index:index + chunk_size] for index in range(0, len(token), chunk_size))
+    return " ".join(parts)
+
+
+def parse_values_preview(value: object) -> dict[str, str]:
+    if not isinstance(value, str):
+        return {}
+    result = {}
+    for item in value.split(" | "):
+        if ": " not in item:
+            continue
+        column, cell_value = item.split(": ", 1)
+        column = column.strip()
+        if column:
+            result[column] = split_long_token(cell_value.strip())
+    return result
+
+
+def chunked(items: list[str], size: int) -> list[list[str]]:
+    return [items[index:index + size] for index in range(0, len(items), size)]
+
+
 def build_model_raw_rows_pdf_elements(
     calculation_result: CalculationResult,
     verification: ResultVerification,
@@ -209,22 +246,66 @@ def build_model_raw_rows_pdf_elements(
     elements.extend([Paragraph(f"Строк: {calculation_result.row_count}", body_style), Spacer(1, 12)])
 
     rows = visible_rows(calculation_result.rows)
-    for row in rows:
-        raw_sheet = row.get("raw_sheet")
-        row_number = row.get("row_number")
-        row_label = row.get("row_label") or "без названия"
-        title_parts = []
-        if raw_sheet is not None:
-            title_parts.append(f"Лист: {format_value('raw_sheet', raw_sheet)}")
-        if row_number is not None:
-            title_parts.append(f"Строка {format_number(row_number)}")
-        title_parts.append(str(row_label))
-        elements.append(Paragraph(" - ".join(title_parts), body_style))
+    parsed_rows = [(row, parse_values_preview(row.get("values_preview"))) for row in rows]
+    value_columns = sorted(
+        {column for _, values in parsed_rows for column in values},
+        key=excel_column_index,
+    )
+    if not value_columns:
+        value_columns = ["values_preview"]
 
-        values_preview = row.get("values_preview")
-        if values_preview is not None:
-            elements.append(Paragraph(format_pdf_text("values_preview", values_preview), body_style))
-        elements.append(Spacer(1, 8))
+    raw_table_style = ParagraphStyle(
+        "RawTableBody",
+        parent=body_style,
+        fontSize=7,
+        leading=8,
+    )
+    for chunk_index, value_chunk in enumerate(chunked(value_columns, 6)):
+        if chunk_index:
+            elements.append(PageBreak())
+        chunk_label = f"Колонки {value_chunk[0]}-{value_chunk[-1]}" if value_chunk else "Значения"
+        elements.append(Paragraph(chunk_label, body_style))
+        elements.append(Spacer(1, 6))
+
+        data = [
+            [Paragraph("Строка", raw_table_style), Paragraph("Название", raw_table_style)]
+            + [Paragraph(column, raw_table_style) for column in value_chunk],
+        ]
+        for row, values in parsed_rows:
+            row_number = row.get("row_number")
+            row_label = row.get("row_label") or ""
+            data.append(
+                [
+                    Paragraph(format_number(row_number) if isinstance(row_number, int | float) else "", raw_table_style),
+                    Paragraph(split_long_token(str(row_label)), raw_table_style),
+                ]
+                + [Paragraph(values.get(column, ""), raw_table_style) for column in value_chunk],
+            )
+
+        available_width = landscape(A4)[0] - 48
+        first_width = 34
+        label_width = 130
+        value_width = (available_width - first_width - label_width) / max(len(value_chunk), 1)
+        table = Table(
+            data,
+            colWidths=[first_width, label_width] + [value_width] * len(value_chunk),
+            repeatRows=1,
+        )
+        table.setStyle(
+            TableStyle(
+                [
+                    ("FONTNAME", (0, 0), (-1, -1), body_style.fontName),
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                    ("TOPPADDING", (0, 0), (-1, -1), 2),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+                ],
+            ),
+        )
+        elements.append(table)
     return elements
 
 
