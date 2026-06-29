@@ -530,7 +530,16 @@ def build_table_answer(response_data: ResponseData) -> AnswerDraft | None:
 
 def build_unready_answer(response_data: ResponseData | None) -> AnswerDraft:
     errors = response_data.errors if response_data else ["response_data_missing"]
-    text = "По заданным условиям данных не найдено." if response_data and "empty_result" in errors else "Не удалось подготовить проверенный ответ по данным."
+    if response_data and "empty_result" in errors:
+        source = response_data.source
+        filters = source.get("filters") if isinstance(source.get("filters"), dict) else {}
+        step_no = filters.get("step_no") if isinstance(filters, dict) else None
+        if source.get("report_type") == "roadmap" and source.get("view") == "step_details" and step_no is not None:
+            text = f"Этап {step_no} не найден в дорожной карте за выбранный период."
+        else:
+            text = "По заданным условиям данных не найдено."
+    else:
+        text = "Не удалось подготовить проверенный ответ по данным."
     return AnswerDraft(
         text=text,
         used_metrics=[],

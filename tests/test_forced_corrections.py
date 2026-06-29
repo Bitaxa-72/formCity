@@ -215,6 +215,71 @@ def test_payment_calendar_sections_question_becomes_article_kind_dimension() -> 
     assert parsed.state_delta.dimension == "article_kind"
 
 
+def test_roadmap_context_step_number_becomes_step_filter() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {"report_type": "roadmap"},
+        "что на этапе 7?",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.view == "step_details"
+    assert parsed.state_delta.filters == {"step_no": 7}
+
+
+def test_roadmap_explicit_step_number_becomes_step_filter() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "дорожная карта этап 2",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.view == "step_details"
+    assert parsed.state_delta.filters == {"step_no": 2}
+
+
+def test_roadmap_reverse_step_number_becomes_step_filter() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {"report_type": "roadmap"},
+        "покажи 5 этап дорожной карты",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.view == "step_details"
+    assert parsed.state_delta.filters == {"step_no": 5}
+
+
+def test_roadmap_step_word_without_number_keeps_steps_view() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {"report_type": "roadmap"},
+        "какие этапы есть в дорожной карте?",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.view == "roadmap_steps"
+    assert parsed.state_delta.filters == {}
+
+
+def test_roadmap_unsupported_metric_keeps_priority_over_step_filter() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "дорожная карта выручка этап 2",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "roadmap"
+    assert parsed.state_delta.metrics == ["plan"]
+    assert parsed.state_delta.filters == {}
+
+
+def test_non_roadmap_step_number_does_not_force_roadmap() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {},
+        "платежный календарь этап 2",
+    )
+
+    assert parsed is None
+
+
 def test_model_failed_metric_can_be_corrected_to_kpi() -> None:
     state, parsed = build_forced_parsed_response(
         {

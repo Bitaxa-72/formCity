@@ -1,3 +1,5 @@
+import re
+
 from app.llm.dictionary import Intent
 from app.llm.parser import LLMParsedResponse, StateDelta
 from app.pipeline.domain_resolver import normalize_search_text
@@ -61,6 +63,21 @@ def has_roadmap_step_word(normalized_text: str) -> bool:
     return any(word.startswith("этап") or word.startswith("шаг") for word in words)
 
 
+def extract_roadmap_step_no(text: str | None) -> int | None:
+    normalized_text = normalize_search_text(text or "")
+    if not normalized_text:
+        return None
+    patterns = (
+        r"(?:^|\s)(?:этап\w*|шаг\w*)\s+(\d{1,3})(?:\s|$)",
+        r"(?:^|\s)(\d{1,3})\s+(?:этап\w*|шаг\w*)(?:\s|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized_text)
+        if match is not None:
+            return int(match.group(1))
+    return None
+
+
 def resolve_roadmap_recovery(text: str | None) -> tuple[str, dict[str, object]] | None:
     normalized_text = normalize_search_text(text or "")
     if not normalized_text:
@@ -98,6 +115,15 @@ def resolve_roadmap_recovery(text: str | None) -> tuple[str, dict[str, object]] 
             "metrics": ["duration_min", "duration_max"],
             "view": "external_steps",
             "filters": {},
+            "group_by": [],
+        }
+
+    step_no = extract_roadmap_step_no(normalized_text)
+    if step_no is not None:
+        return "data_query", {
+            "metrics": ["duration_min", "duration_max"],
+            "view": "step_details",
+            "filters": {"step_no": step_no},
             "group_by": [],
         }
 
@@ -187,10 +213,12 @@ def build_roadmap_context_correction(
     state: dict[str, object] | None,
     text: str | None,
 ) -> LLMParsedResponse | None:
-    if not state or state.get("report_type") != "roadmap":
+    normalized_text = normalize_search_text(text or "")
+    roadmap_context = bool(state and state.get("report_type") == "roadmap")
+    explicit_roadmap = any(alias in normalized_text for alias in ROADMAP_REPORT_ALIASES)
+    if not roadmap_context and not explicit_roadmap:
         return None
 
-    normalized_text = normalize_search_text(text or "")
     if not has_roadmap_step_word(normalized_text):
         return None
 

@@ -100,6 +100,26 @@ def test_roadmap_steps_view_clears_total_duration_filter() -> None:
     assert frame.group_by == ["row_order", "step", "parent_step", "action", "external", "total"]
 
 
+def test_roadmap_step_details_keeps_step_filter() -> None:
+    frame = apply_report_semantics(
+        build_query_frame(
+            {
+                "last_intent": "data_query",
+                "report_type": "roadmap",
+                "view": "step_details",
+                "metrics": ["duration_min", "duration_max"],
+                "filters": {"step_no": 2},
+            },
+        ),
+    )
+    metric_resolution = resolve_metrics(frame)
+    query = compile_sql(frame, metric_resolution)
+
+    assert frame.filters == {"step_no": 2}
+    assert query.params["filter_step_no"] == 2
+    assert "step_no = :filter_step_no" in query.sql
+
+
 def test_roadmap_domain_uses_latest_period_when_missing() -> None:
     session = create_session()
     add_roadmap_step(session, date(2026, 3, 1), 1, "March step", step_no=1)
@@ -217,3 +237,30 @@ def test_roadmap_total_duration_answer() -> None:
     draft = build_fallback_answer(response_data)
 
     assert draft.text == "Дорожная карта\nПериод: апрель 2026\n\nИтого: 9-15 раб. дн."
+
+
+def test_roadmap_missing_step_answer_mentions_step_number() -> None:
+    session = create_session()
+    add_roadmap_step(session, date(2026, 4, 1), 1, "Prepare documents", step_no=1)
+    session.commit()
+
+    frame = apply_report_semantics(
+        build_query_frame(
+            {
+                "last_intent": "data_query",
+                "report_type": "roadmap",
+                "view": "step_details",
+                "filters": {"step_no": 99},
+                "period": {"from": "2026-04-01", "to": "2026-04-30", "label": "апрель 2026"},
+            },
+        ),
+    )
+    metric_resolution = resolve_metrics(frame)
+    query = compile_sql(frame, metric_resolution)
+    calculation = CalculationEngine(session).calculate(frame, query, None)
+    verification = verify_result(frame, metric_resolution, calculation)
+    response_data = build_response_data(calculation, verification)
+
+    draft = build_fallback_answer(response_data)
+
+    assert draft.text == "Этап 99 не найден в дорожной карте за выбранный период."
