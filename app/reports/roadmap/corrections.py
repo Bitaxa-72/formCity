@@ -253,7 +253,7 @@ def build_explicit_roadmap_unsupported_metric_correction(text: str | None) -> LL
             {
                 "report_type": "roadmap",
                 "project": "all",
-                "metrics": ["plan"],
+                "metrics": ["duration_min"],
                 "filters": {},
                 "group_by": [],
             },

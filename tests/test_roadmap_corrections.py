@@ -56,7 +56,7 @@ def test_explicit_roadmap_unsupported_metric_reaches_roadmap_compatibility() -> 
     assert parsed is not None
     assert parsed.state_delta.report_type == "roadmap"
     assert parsed.state_delta.project == "all"
-    assert parsed.state_delta.metrics == ["plan"]
+    assert parsed.state_delta.metrics == ["duration_min"]
 
 
 def test_failed_roadmap_periods_followup_clears_failed_period() -> None:
@@ -147,3 +147,19 @@ def test_roadmap_compatibility_rejects_sensitive_request() -> None:
     assert result.valid is False
     assert result.error == "sensitive_field_not_supported_for_roadmap"
     assert 'не вывожу "телефоны"' in result.message
+
+
+def test_roadmap_compatibility_uses_current_unsupported_metric_text() -> None:
+    frame = apply_report_semantics(build_query_frame(
+        {
+            "report_type": "roadmap",
+            "metrics": ["duration_min"],
+            "period": {"label": "апрель"},
+        },
+    ))
+
+    result = check_roadmap_compatibility(frame, "дорожная карта сделки")
+
+    assert result.valid is False
+    assert result.error == "metric_not_supported_for_roadmap"
+    assert 'нет показателя "количество сделок"' in result.message

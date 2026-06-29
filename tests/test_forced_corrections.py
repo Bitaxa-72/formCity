@@ -267,7 +267,7 @@ def test_roadmap_unsupported_metric_keeps_priority_over_step_filter() -> None:
 
     assert parsed is not None
     assert parsed.state_delta.report_type == "roadmap"
-    assert parsed.state_delta.metrics == ["plan"]
+    assert parsed.state_delta.metrics == ["duration_min"]
     assert parsed.state_delta.filters == {}
 
 
@@ -279,7 +279,7 @@ def test_roadmap_deals_stays_in_roadmap_for_compatibility() -> None:
 
     assert parsed is not None
     assert parsed.state_delta.report_type == "roadmap"
-    assert parsed.state_delta.metrics == ["plan"]
+    assert parsed.state_delta.metrics == ["duration_min"]
     assert parsed.state_delta.filters == {}
 
 
