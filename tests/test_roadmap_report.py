@@ -120,6 +120,23 @@ def test_roadmap_step_details_keeps_step_filter() -> None:
     assert "step_no = :filter_step_no" in query.sql
 
 
+def test_roadmap_steps_view_clears_previous_step_filter() -> None:
+    frame = apply_report_semantics(
+        build_query_frame(
+            {
+                "last_intent": "data_query",
+                "report_type": "roadmap",
+                "view": "roadmap_steps",
+                "metrics": ["duration_min", "duration_max"],
+                "filters": {"step_no": 99},
+            },
+        ),
+    )
+
+    assert "step_no" not in frame.filters
+    assert frame.view == "roadmap_steps"
+
+
 def test_roadmap_domain_uses_latest_period_when_missing() -> None:
     session = create_session()
     add_roadmap_step(session, date(2026, 3, 1), 1, "March step", step_no=1)
