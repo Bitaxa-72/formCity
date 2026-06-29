@@ -31,9 +31,11 @@ def test_model_source_sheet_context_turns_short_text_into_sheet_search() -> None
     )
 
     assert parsed is not None
-    assert parsed.state_delta.report_type is None
+    assert parsed.state_delta.report_type == "model"
     assert parsed.state_delta.view == "model_raw_search"
     assert parsed.state_delta.filters == {"raw_sheet": "remains", "raw_query": "помещения"}
+    assert parsed.state_delta.period is not None
+    assert parsed.state_delta.period.label == "апрель"
 
 
 def test_model_source_sheet_context_turns_pir_into_sheet_search() -> None:
@@ -48,9 +50,28 @@ def test_model_source_sheet_context_turns_pir_into_sheet_search() -> None:
     )
 
     assert parsed is not None
-    assert parsed.state_delta.report_type is None
+    assert parsed.state_delta.report_type == "model"
     assert parsed.state_delta.view == "model_raw_search"
     assert parsed.state_delta.filters == {"raw_sheet": "remains", "raw_query": "пир"}
+    assert parsed.state_delta.period is not None
+    assert parsed.state_delta.period.label == "апрель"
+
+
+def test_model_source_sheet_context_restores_missing_report_type() -> None:
+    _state, parsed = build_forced_parsed_response(
+        {
+            "report_type": None,
+            "view": "model_raw_search",
+            "period": {"label": "апрель"},
+            "filters": {"raw_sheet": "remains", "raw_query": "смр"},
+        },
+        "смр",
+    )
+
+    assert parsed is not None
+    assert parsed.state_delta.report_type == "model"
+    assert parsed.state_delta.view == "model_raw_search"
+    assert parsed.state_delta.filters == {"raw_sheet": "remains", "raw_query": "смр"}
 
 
 def test_payment_calendar_failed_group_by_can_be_corrected_to_projects() -> None:

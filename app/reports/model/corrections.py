@@ -408,8 +408,6 @@ def build_model_raw_followup_correction(
     current_state: dict[str, object],
     text: str | None,
 ) -> LLMParsedResponse | None:
-    if current_state.get("report_type") != "model":
-        return None
     if current_state.get("view") not in {"model_raw_rows", "model_raw_search"}:
         return None
     filters = current_state.get("filters")
@@ -427,6 +425,7 @@ def build_model_raw_followup_correction(
         return None
 
     state_delta: dict[str, object] = {
+        "report_type": "model",
         "view": "model_raw_search",
         "metrics": [],
         "filters": {
@@ -438,6 +437,10 @@ def build_model_raw_followup_correction(
     period_label = extract_model_period_label(normalized_text)
     if period_label:
         state_delta["period"] = {"label": period_label}
+    elif isinstance(current_state.get("period"), dict):
+        current_period = current_state["period"]
+        if any(current_period.get(key) for key in ("from", "to", "label")):
+            state_delta["period"] = dict(current_period)
 
     return LLMParsedResponse(
         intent=Intent.DATA_QUERY,

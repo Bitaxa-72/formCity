@@ -126,10 +126,32 @@ def test_build_model_raw_followup_correction_uses_current_sheet_context() -> Non
 
     assert correction is not None
     assert correction.intent == "data_query"
-    assert correction.state_delta.report_type is None
+    assert correction.state_delta.report_type == "model"
     assert correction.state_delta.view == "model_raw_search"
     assert correction.state_delta.filters == {"raw_sheet": "remains", "raw_query": "помещения"}
     assert correction.state_delta.metrics == []
+    assert correction.state_delta.period is not None
+    assert correction.state_delta.period.label == "апрель"
+
+
+def test_build_model_raw_followup_correction_restores_missing_report_type() -> None:
+    correction = build_model_raw_followup_correction(
+        {
+            "report_type": None,
+            "view": "model_raw_search",
+            "period": {"label": "апрель"},
+            "filters": {"raw_sheet": "remains", "raw_query": "смр"},
+        },
+        "смр",
+    )
+
+    assert correction is not None
+    assert correction.intent == "data_query"
+    assert correction.state_delta.report_type == "model"
+    assert correction.state_delta.view == "model_raw_search"
+    assert correction.state_delta.filters == {"raw_sheet": "remains", "raw_query": "смр"}
+    assert correction.state_delta.period is not None
+    assert correction.state_delta.period.label == "апрель"
 
 
 def test_model_metric_correction_ignores_technical_tail() -> None:
