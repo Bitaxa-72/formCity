@@ -74,14 +74,16 @@ def test_build_model_raw_sheet_list_correction_returns_backend_payload() -> None
     assert correction.state_delta.metrics == []
 
 
-def test_build_model_raw_rows_correction_returns_backend_payload() -> None:
+def test_build_model_financial_sheet_correction_returns_summary_payload() -> None:
     correction = build_model_raw_rows_correction("модель финмодель апрель")
 
     assert correction is not None
     assert correction.intent == "data_query"
     assert correction.state_delta.report_type == "model"
-    assert correction.state_delta.view == "model_raw_rows"
-    assert correction.state_delta.filters == {"raw_sheet": "financial_model"}
+    assert correction.state_delta.view == "model_financial_summary"
+    assert correction.state_delta.filters == {}
+    assert "model_revenue" in correction.state_delta.metrics
+    assert "model_pir_per_sqm" in correction.state_delta.metrics
     assert correction.state_delta.period is not None
     assert correction.state_delta.period.label == "апрель"
 

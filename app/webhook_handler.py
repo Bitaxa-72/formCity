@@ -45,7 +45,6 @@ from app.pipeline.math_shortcuts import resolve_math_shortcut, resolve_pending_m
 from app.pipeline.metric_resolver import REPORT_NOT_CONNECTED_MESSAGE, resolve_metrics
 from app.pipeline.non_data_flow import handle_general_question, handle_guarded_non_data_request, handle_unsupported_query
 from app.pipeline.pdf_report import PDF_REPORT_NOTICE, build_pdf_report, should_send_pdf_report
-from app.pipeline.spreadsheet_report import XLSX_MIME_TYPE, XLSX_REPORT_NOTICE, build_model_raw_xlsx_report, should_send_xlsx_report
 from app.pipeline.pending_actions import PENDING_SHOW_AVAILABLE_ARTICLES
 from app.pipeline.pending_flow import handle_pending_action
 from app.pipeline.query_frame import NON_DATA_QUERY_MESSAGE, build_query_frame
@@ -963,57 +962,6 @@ async def process_telegram_webhook(
         )
     pdf_error = None
     telegram_response_status = None
-    if (
-        response_data is not None
-        and response_data.ready
-        and calculation_result is not None
-        and should_send_xlsx_report(response_data, calculation_result)
-    ):
-        try:
-            stage_started_at = perf_counter()
-            xlsx_bytes, xlsx_filename = build_model_raw_xlsx_report(calculation_result)
-            record_timing(timings, "xlsx", stage_started_at)
-            await stop_background_task(typing_task)
-            await safe_send_chat_action(telegram_client, message.chat.id, CHAT_ACTION_UPLOAD_DOCUMENT, request_id)
-            stage_started_at = perf_counter()
-            await safe_send_message(telegram_client, message.chat.id, XLSX_REPORT_NOTICE, request_id)
-            await telegram_client.send_document(
-                message.chat.id,
-                xlsx_bytes,
-                xlsx_filename,
-                caption="Готовый отчет в XLSX.",
-                mime_type=XLSX_MIME_TYPE,
-            )
-            record_timing(timings, "telegram_send", stage_started_at)
-            telegram_response_status = TelegramResponseStatus(sent=True, chunks=2)
-        except Exception as error:
-            await stop_background_task(typing_task)
-            pdf_error = type(error).__name__
-            logger.warning(
-                "xlsx_report_failed request_id=%s update_id=%s chat_id=%s username=%s error=%s",
-                request_id,
-                update.update_id,
-                message.chat.id,
-                username,
-                pdf_error,
-            )
-        else:
-            logger.info(
-                "xlsx_report_sent request_id=%s update_id=%s chat_id=%s username=%s filename=%s",
-                request_id,
-                update.update_id,
-                message.chat.id,
-                username,
-                xlsx_filename,
-            )
-            await send_admin_debug(
-                telegram_client,
-                message.chat.id,
-                request_id,
-                admin_debug_enabled,
-                "11 XLSXReport",
-                {"filename": xlsx_filename, "bytes": len(xlsx_bytes), "sent": True},
-            )
     if (
         response_data is not None
         and response_data.ready

@@ -1,9 +1,7 @@
 from dataclasses import dataclass
-from io import BytesIO
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
-from openpyxl import load_workbook
 
 from app.core.access import UNAUTHORIZED_ACCESS_MESSAGE
 from app.bot.commands import (
@@ -49,7 +47,6 @@ from app.pipeline.report_compatibility import (
     PAYMENT_CALENDAR_GROUP_BY_COMPATIBILITY_MESSAGE_TEMPLATE,
     build_payment_calendar_compatibility_message,
 )
-from app.pipeline.spreadsheet_report import XLSX_MIME_TYPE, XLSX_REPORT_NOTICE
 
 
 class FakeTelegramClient:
@@ -2196,22 +2193,51 @@ def test_telegram_webhook_model_raw_sheet_list_without_llm() -> None:
     assert fake_domain_resolver.calls[0].dimension == "raw_sheet"
 
 
-def test_telegram_webhook_model_raw_rows_without_llm() -> None:
+def test_telegram_webhook_model_financial_model_uses_summary_without_llm() -> None:
     fake_calculation_engine.result = SimpleNamespace(
         kind="sql_result",
         rows=[
             {
-                "raw_sheet": "Финмодель",
-                "row_number": row_number,
-                "row_label": f"Строка {row_number}",
-                "visible_cells": 3,
-                "values_preview": f"B: Строка {row_number} | E: {row_number} | M: показатель",
+                "model_revenue": 1000,
+                "model_cost_of_sales": -600,
+                "model_gross_profit": 400,
+                "model_net_profit": 100,
+                "model_npv": 50,
+                "model_roe": 45,
+                "model_llcr": 1.1,
+                "model_total_area": 56279.3,
+                "model_units_count": 1214,
+                "model_pir_total": -162810134.35,
+                "model_pir_per_sqm": 4353.36,
             }
-            for row_number in range(1, 32)
         ],
-        row_count=31,
-        metrics=[],
-        columns=["raw_sheet", "row_number", "row_label", "visible_cells", "values_preview"],
+        row_count=1,
+        metrics=[
+            "model_revenue",
+            "model_cost_of_sales",
+            "model_gross_profit",
+            "model_net_profit",
+            "model_npv",
+            "model_roe",
+            "model_llcr",
+            "model_total_area",
+            "model_units_count",
+            "model_pir_total",
+            "model_pir_per_sqm",
+        ],
+        columns=[
+            "model_revenue",
+            "model_cost_of_sales",
+            "model_gross_profit",
+            "model_net_profit",
+            "model_npv",
+            "model_roe",
+            "model_llcr",
+            "model_total_area",
+            "model_units_count",
+            "model_pir_total",
+            "model_pir_per_sqm",
+        ],
         operation=None,
     )
 
@@ -2240,21 +2266,10 @@ def test_telegram_webhook_model_raw_rows_without_llm() -> None:
     assert body["telegram_response_sent"] is True
     assert fake_llm_parser.inputs == []
     assert fake_domain_resolver.calls[0].report_type == "model"
-    assert fake_domain_resolver.calls[0].view == "model_raw_rows"
-    assert fake_domain_resolver.calls[0].filters == {"raw_sheet": "financial_model"}
+    assert fake_domain_resolver.calls[0].view == "model_financial_summary"
+    assert fake_domain_resolver.calls[0].filters == {"scenario": "current"}
     assert fake_domain_resolver.calls[0].period.label == "апрель"
-    assert fake_llm_answerer.calls == []
-    assert fake_telegram_client.messages == [(9361, XLSX_REPORT_NOTICE)]
-    assert len(fake_telegram_client.documents) == 1
-    document = fake_telegram_client.documents[0]
-    assert document["filename"] == "model.xlsx"
-    assert document["caption"] == "Готовый отчет в XLSX."
-    assert document["mime_type"] == XLSX_MIME_TYPE
-    workbook = load_workbook(BytesIO(document["file_bytes"]))
-    worksheet = workbook.active
-    assert worksheet.cell(row=1, column=1).value == "Лист"
-    assert worksheet.cell(row=1, column=5).value == "B"
-    assert worksheet.cell(row=2, column=3).value == "Строка 1"
+    assert fake_telegram_client.documents == []
 
 
 def test_telegram_webhook_model_short_metric_context_replaces_metric_without_llm() -> None:

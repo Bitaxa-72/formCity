@@ -13,6 +13,19 @@ MODEL_SUMMARY_METRICS = [
     "model_net_profit",
     "model_npv",
 ]
+MODEL_FINANCIAL_SUMMARY_METRICS = [
+    "model_revenue",
+    "model_cost_of_sales",
+    "model_gross_profit",
+    "model_net_profit",
+    "model_npv",
+    "model_roe",
+    "model_llcr",
+    "model_total_area",
+    "model_units_count",
+    "model_pir_total",
+    "model_pir_per_sqm",
+]
 
 MODEL_METRICS = {
     "model_revenue": MetricSpec(unit="rub", group_by=MODEL_GROUP_BY, filters=MODEL_FILTERS, projects=MODEL_PROJECTS),

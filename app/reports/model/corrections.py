@@ -8,6 +8,7 @@ from app.pipeline.failed_query import (
     FAILED_QUERY_STATE,
     clear_failed_query_markers,
 )
+from app.reports.model.catalog import MODEL_FINANCIAL_SUMMARY_METRICS
 
 
 MODEL_SUMMARY_MARKERS = (
@@ -355,6 +356,22 @@ def build_model_raw_rows_correction(
     period_label = extract_model_period_label(normalized_text)
     raw_query = extract_model_raw_query(normalized_text)
     is_search = any(marker in normalized_text for marker in MODEL_RAW_SEARCH_MARKERS) and raw_query is not None
+    if raw_sheet == "financial_model" and not is_search:
+        state_delta: dict[str, object] = {
+            "report_type": "model",
+            "view": "model_financial_summary",
+            "metrics": MODEL_FINANCIAL_SUMMARY_METRICS,
+            "filters": {},
+            "group_by": [],
+        }
+        if period_label:
+            state_delta["period"] = {"label": period_label}
+        return LLMParsedResponse(
+            intent=Intent.DATA_QUERY,
+            state_delta=StateDelta.model_validate(state_delta),
+            confidence=1,
+        )
+
     filters: dict[str, object] = {"raw_sheet": raw_sheet}
     if is_search:
         filters["raw_query"] = raw_query

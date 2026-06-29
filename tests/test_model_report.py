@@ -232,6 +232,58 @@ def test_model_uses_obvodny_with_notice_for_other_project() -> None:
     assert "NPV: 500 руб." in draft.text
 
 
+def test_model_financial_summary_returns_classified_sections() -> None:
+    session = create_session()
+    add_model_source(session, date(2026, 4, 1))
+    add_model_kpi(session, date(2026, 4, 1), "Выручка", "model_revenue", Decimal("1000"), 1)
+    add_model_kpi(session, date(2026, 4, 1), "Себестоимость продаж", "model_cost_of_sales", Decimal("-600"), 2)
+    add_model_kpi(session, date(2026, 4, 1), "Валовая прибыль", "model_gross_profit", Decimal("400"), 3)
+    add_model_kpi(session, date(2026, 4, 1), "Чистая прибыль", "model_net_profit", Decimal("100"), 4)
+    add_model_comparison(session, date(2026, 4, 1), "NPV", "model_npv", Decimal("-50"), 5)
+    add_model_comparison(session, date(2026, 4, 1), "ROE", "model_roe", Decimal("45.46"), 6)
+    add_model_comparison(session, date(2026, 4, 1), "LLCR", "model_llcr", Decimal("1.01"), 7)
+    add_model_kpi(session, date(2026, 4, 1), "Общая площадь", "model_total_area", Decimal("56279.3"), 8)
+    add_model_kpi(session, date(2026, 4, 1), "Квартиры, шт. в т.ч.:", "model_units_count", Decimal("1214"), 9)
+    add_model_comparison(session, date(2026, 4, 1), "ПИР", "model_pir", Decimal("-162810134.35"), 10)
+    add_model_comparison(session, date(2026, 4, 1), "ПИР", "model_pir", Decimal("4353.36"), 11)
+    session.commit()
+
+    draft, calculation, query = build_model_answer(
+        session,
+        {
+            "last_intent": "data_query",
+            "report_type": "model",
+            "period": {"label": "апрель"},
+            "view": "model_financial_summary",
+            "metrics": [
+                "model_revenue",
+                "model_cost_of_sales",
+                "model_gross_profit",
+                "model_net_profit",
+                "model_npv",
+                "model_roe",
+                "model_llcr",
+                "model_total_area",
+                "model_units_count",
+                "model_pir_total",
+                "model_pir_per_sqm",
+            ],
+        },
+    )
+
+    assert query.table.startswith("(")
+    assert calculation.rows[0]["model_revenue"] == 1000.0
+    assert "Финансовые показатели:" in draft.text
+    assert "- Выручка: 1 000 руб." in draft.text
+    assert "Эффективность:" in draft.text
+    assert "- ROE: 45.46%" in draft.text
+    assert "ТЭПы:" in draft.text
+    assert "- Общая площадь: 56 279.3 м2" in draft.text
+    assert "ПИР:" in draft.text
+    assert "- ПИР на м2: 4 353.36 руб./м2" in draft.text
+    assert "Строка" not in draft.text
+
+
 def test_model_all_project_does_not_show_instead_of_all_projects_notice() -> None:
     session = create_session()
     add_model_source(session, date(2026, 4, 1))

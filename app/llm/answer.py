@@ -299,6 +299,72 @@ def build_model_raw_answer(response_data: ResponseData) -> AnswerDraft | None:
     )
 
 
+def build_model_financial_summary_answer(response_data: ResponseData) -> AnswerDraft | None:
+    if response_data.source.get("report_type") != "model":
+        return None
+    if response_data.source.get("view") != "model_financial_summary":
+        return None
+    if response_data.table is None or not response_data.table.rows:
+        return None
+
+    row = response_data.table.rows[0]
+    units = response_data.source.get("units")
+    units = units if isinstance(units, dict) else {}
+    sections = [
+        (
+            "Финансовые показатели",
+            [
+                "model_revenue",
+                "model_cost_of_sales",
+                "model_gross_profit",
+                "model_net_profit",
+                "model_npv",
+            ],
+        ),
+        (
+            "Эффективность",
+            [
+                "model_roe",
+                "model_llcr",
+            ],
+        ),
+        (
+            "ТЭПы",
+            [
+                "model_total_area",
+                "model_units_count",
+            ],
+        ),
+        (
+            "ПИР",
+            [
+                "model_pir_total",
+                "model_pir_per_sqm",
+            ],
+        ),
+    ]
+
+    lines = build_answer_header(response_data)
+    for title, metrics in sections:
+        section_lines = [
+            format_metric_line(metric, row.get(metric), units.get(metric))
+            for metric in metrics
+            if metric in row
+        ]
+        if not section_lines:
+            continue
+        lines.append("")
+        lines.append(f"{title}:")
+        lines.extend(f"- {line}" for line in section_lines)
+
+    return AnswerDraft(
+        text="\n".join(lines),
+        used_metrics=[metric for metric in response_data.source.get("metrics", []) if isinstance(metric, str)],
+        source=response_data.source,
+        warnings=response_data.warnings,
+    )
+
+
 def build_model_available_metrics_answer(response_data: ResponseData) -> AnswerDraft | None:
     if response_data.source.get("report_type") != "model":
         return None
@@ -332,6 +398,10 @@ def build_ready_answer(response_data: ResponseData) -> AnswerDraft:
     model_raw_answer = build_model_raw_answer(response_data)
     if model_raw_answer is not None:
         return model_raw_answer
+
+    model_financial_summary_answer = build_model_financial_summary_answer(response_data)
+    if model_financial_summary_answer is not None:
+        return model_financial_summary_answer
 
     table_answer = build_table_answer(response_data)
     if table_answer is not None:
