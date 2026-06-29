@@ -26,6 +26,26 @@ EMAIL_RE = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 DOCUMENT_NUMBER_RE = re.compile(r"(?i)(№\s*)[A-Za-zА-Яа-я0-9/_-]{2,}")
 FIO_INITIALS_RE = re.compile(r"\b[А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ]\.){1,2}")
 FIO_FULL_RE = re.compile(r"\b[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+(?:вич|вна|ич|на|оглы|кызы)\b")
+PHONE_CONTEXT_MARKERS = ("телефон", "тел.", "контакт", "моб", "phone", "mobile")
+NUMBER_CONTEXT_MARKERS = (
+    "руб",
+    "млн",
+    "тыс",
+    "м2",
+    "м²",
+    "выруч",
+    "пир",
+    "смр",
+    "остат",
+    "исполн",
+    "сумм",
+    "план",
+    "факт",
+    "отклон",
+    "площад",
+    "значен",
+    "строк",
+)
 
 
 def is_sensitive_column(column: str) -> bool:
@@ -46,7 +66,18 @@ def phone_match_is_financial_number(match: re.Match[str]) -> bool:
     start, end = match.span()
     previous_char = match.string[start - 1 : start] if start > 0 else ""
     next_char = match.string[end : end + 1]
-    return "." in value or "," in value or previous_char in {".", ","} or next_char in {".", ","}
+    window = match.string[max(0, start - 40) : min(len(match.string), end + 40)].casefold()
+    if "." in value or "," in value or previous_char in {".", ","} or next_char in {".", ","}:
+        return True
+    if any(marker in window for marker in NUMBER_CONTEXT_MARKERS):
+        return True
+    if value.startswith("+"):
+        return False
+    if any(char in value for char in ("(", ")", "-")):
+        return False
+    if any(marker in window for marker in PHONE_CONTEXT_MARKERS):
+        return False
+    return True
 
 
 def replace_phone_match(match: re.Match[str]) -> str:

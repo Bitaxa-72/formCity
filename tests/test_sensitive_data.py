@@ -62,6 +62,22 @@ def test_sanitize_text_does_not_mask_decimal_numbers() -> None:
     assert "[контакт скрыт]" not in sanitized
 
 
+def test_sanitize_text_does_not_mask_table_numbers() -> None:
+    text = "Остаток: 1314403300; Суммы по строке: 11166655390; ПИР: -162810134"
+
+    sanitized = sanitize_text(text)
+
+    assert "1314403300" in sanitized
+    assert "11166655390" in sanitized
+    assert "-162810134" in sanitized
+    assert "[контакт скрыт]" not in sanitized
+
+
+def test_sanitize_text_masks_real_phone_context() -> None:
+    assert sanitize_text("телефон 79991112233") == "телефон [контакт скрыт]"
+    assert sanitize_text("контакт 8 (999) 111-22-33") == "контакт [контакт скрыт]"
+
+
 def test_sanitize_text_masks_person_names() -> None:
     text = "Ответственный Романников С.В., клиент Иванов Иван Иванович"
 
